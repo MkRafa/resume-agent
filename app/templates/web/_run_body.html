@@ -1,0 +1,177 @@
+{% set terminal = run.status in ("done", "failed", "needs_review") %}
+<div data-terminal="{{ 'true' if terminal else 'false' }}">
+
+<h1>{{ run.jd_title or "Job match" }}</h1>
+<p class="muted small">
+  {% if run.jd_company %}{{ run.jd_company }} · {% endif %}
+  {% if run.profile_key %}<a href="/profiles/{{ run.profile_key }}">{{ run.profile_key }}</a>{% endif %}
+</p>
+
+{% if run.status in ("queued", "running") %}
+  <div class="card">
+    <span class="spinner"></span>
+    <strong style="margin-left:8px">{{ run.stage or "Working" }}…</strong>
+    <p class="small muted" style="margin-bottom:0">
+      Extraction, requirement parsing, grading, tailoring and verification each call a
+      model — this usually takes 30–60 seconds. The page updates itself.
+    </p>
+  </div>
+{% endif %}
+
+{% if run.status == "failed" %}
+  <div class="banner banner-error">
+    <strong>{{ run.stage or "Failed" }}</strong>
+    <p style="margin:6px 0 0">{{ run.error }}</p>
+    {% if run.notes %}
+      <details style="margin-top:10px">
+        <summary class="small" style="cursor:pointer">Provider response</summary>
+        <pre style="white-space:pre-wrap;font-size:11.5px;margin:8px 0 0;max-height:260px;
+                    overflow:auto">{{ run.notes | join("\n") }}</pre>
+      </details>
+    {% endif %}
+  </div>
+  <p><a href="/"><button type="button" class="secondary">Start a new match</button></a></p>
+{% endif %}
+
+{% if run.scorecard and run.scorecard.verdict %}
+  <div class="verdict verdict-{{ run.scorecard.verdict }}">
+    {{ run.scorecard.verdict.replace("_", " ") | title }}
+  </div>
+  <ul class="clean small muted">
+    {% for reason in run.scorecard.verdict_reasons %}<li>{{ reason }}</li>{% endfor %}
+  </ul>
+{% endif %}
+
+{% if run.scorecard and run.scorecard.open_questions %}
+  <div class="banner banner-info">
+    <strong>Needs your confirmation</strong> — a resume can't show these either way, so
+    they're not counted for or against the candidate.
+    <ul class="clean">
+      {% for q in run.scorecard.open_questions %}<li>{{ q }}</li>{% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+{% if rows %}
+<h2>Evidence scorecard</h2>
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <tr><th>Requirement</th><th>Kind</th><th>Grade</th><th>Evidence</th><th>Why</th></tr>
+      {% for item in rows %}
+      <tr>
+        <td>{{ item.req.text }}
+          {% if item.req.boilerplate %}<span class="muted small"> (boilerplate)</span>{% endif %}</td>
+        <td class="kind">{{ item.req.kind }}</td>
+        <td><span class="pill grade-{{ item.row.grade }}">{{ item.row.grade }}</span></td>
+        <td class="small muted">
+          {% for fid in item.row.evidence_fact_ids %}<code>{{ fid }}</code> {% else %}—{% endfor %}
+        </td>
+        <td class="small muted">{{ item.row.rationale }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if run.scorecard and run.scorecard.gaps %}
+<h2>Gaps</h2>
+{% for gap in run.scorecard.gaps %}
+  <div class="card">
+    <span class="pill {% if gap.severity == 'dealbreaker' %}grade-none
+      {%- elif gap.severity == 'significant' %}grade-adjacent{% else %}grade-direct{% endif %}">
+      {{ gap.severity }}</span>
+    <p style="margin:9px 0 4px">{{ gap.explanation }}</p>
+    {% if gap.how_to_address %}
+      <p class="small muted" style="margin:0"><strong>What to do:</strong> {{ gap.how_to_address }}</p>
+    {% endif %}
+  </div>
+{% endfor %}
+{% endif %}
+
+{% if run.scorecard and run.scorecard.adjacent_roles %}
+<h2>Roles this profile would match</h2>
+<div class="card">
+  <ul class="clean">{% for r in run.scorecard.adjacent_roles %}<li>{{ r }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if run.status == "needs_review" and run.verify %}
+<h2>Review before release</h2>
+<div class="card">
+  <p class="small" style="margin-top:0">
+    A second model — a different family from the one that wrote this, and one that never
+    saw the job description — checked every claim against your career facts. It could not
+    trace the items below. <strong>Nothing is released until you decide on each one.</strong>
+  </p>
+  <form method="post" action="/runs/{{ run.id }}/review">
+    {% for flag in run.verify.flags %}
+      <div class="flag flag-{{ flag.severity }}">
+        <label>
+          {% if flag.severity == "blocker" %}
+            <input type="checkbox" name="accept" value="{{ flag.claim }}">
+          {% else %}
+            <input type="checkbox" checked disabled>
+          {% endif %}
+          <span>
+            <strong>{{ flag.claim }}</strong>
+            <span class="pill grade-{{ 'none' if flag.severity == 'blocker' else 'adjacent' }}"
+                  style="margin-left:6px">{{ flag.issue.replace("_", " ") }}</span>
+            <br><span class="small muted">{{ flag.explanation }}</span>
+            {% if flag.severity == "blocker" %}
+              <br><span class="small muted">Tick only if this is genuinely true and you can
+              defend it in an interview.</span>
+            {% else %}
+              <br><span class="small muted">Warning only — doesn't block release.</span>
+            {% endif %}
+          </span>
+        </label>
+      </div>
+    {% endfor %}
+    <button type="submit">Confirm and generate resume</button>
+    <span class="small muted" style="margin-left:10px">
+      Anything left unticked keeps the resume blocked.
+    </span>
+  </form>
+</div>
+{% endif %}
+
+{% if run.status == "done" and run.artifacts.get("resume_html") %}
+<h2>Tailored resume</h2>
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <a href="/runs/{{ run.id }}/resume" target="_blank"><button type="button">Open full page</button></a>
+    <a href="/runs/{{ run.id }}/download"><button type="button" class="secondary">Download</button></a>
+  </div>
+  <iframe src="/runs/{{ run.id }}/resume" style="width:100%;height:640px;border:1px solid var(--line);
+    border-radius:8px;background:#fff"></iframe>
+</div>
+
+{% if run.resume %}
+<h2>Provenance</h2>
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <tr><th>Bullet</th><th>Traces to</th></tr>
+      {% for bullet in run.resume.all_bullets() %}
+      <tr>
+        <td class="small">{{ bullet.text }}</td>
+        <td class="small muted">
+          {% for fid in bullet.fact_ids %}<code>{{ fid }}</code> {% else %}
+            <span class="pill grade-none">no source</span>{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if lint %}
+<h2>ATS check</h2>
+<div class="card"><ul class="clean small">{% for i in lint %}<li>{{ i }}</li>{% endfor %}</ul></div>
+{% endif %}
+{% endif %}
+
+</div>

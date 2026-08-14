@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets. .env.example is the tracked template and stays empty.
+.env
+.env.*
+!.env.example
+
+# Runtime data is PII by default: uploaded resumes, extracted career graphs,
+# the SQLite store and generated documents. Ignore the whole directory and
+# allow back only the synthetic fixtures we deliberately ship.
+data/
+!data/profiles/
+!data/profiles/sample_*
+!data/jds/
+!data/jds/sample_*
+
+# Cached model output for the gold runner — regenerable, and holds extracted
+# profile content.
+evals/.cache/

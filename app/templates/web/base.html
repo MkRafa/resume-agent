@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}resume-agent{% endblock %}</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1a1a19; --muted: #6b6b68;
+    --line: #e4e4e1; --accent: #2f5d50;
+    --green: #1f7a4d; --amber: #a06a00; --red: #b3261e; --blue: #2a5b9a;
+    --green-bg: #e8f5ee; --amber-bg: #fdf3e0; --red-bg: #fdeceb; --blue-bg: #eaf1fa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16171a; --panel: #1e2024; --ink: #e8e8e6; --muted: #9a9a96;
+      --line: #2e3137; --accent: #7fc0ab;
+      --green: #6cc79a; --amber: #e0ac4f; --red: #f08a80; --blue: #7fa8dd;
+      --green-bg: #1a2e24; --amber-bg: #302713; --red-bg: #331f1d; --blue-bg: #1b2635;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  header {
+    border-bottom: 1px solid var(--line); background: var(--panel);
+    padding: 14px 22px; display: flex; align-items: baseline; gap: 18px;
+  }
+  header .brand { font-weight: 650; letter-spacing: -.2px; }
+  header .brand a { color: var(--ink); text-decoration: none; }
+  header nav a { color: var(--muted); text-decoration: none; margin-right: 14px; font-size: 14px; }
+  header nav a:hover { color: var(--ink); }
+  main { max-width: 1000px; margin: 0 auto; padding: 26px 22px 70px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.3px; }
+  h2 { font-size: 15px; margin: 26px 0 10px; letter-spacing: .3px;
+       text-transform: uppercase; color: var(--muted); }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 5px; }
+  textarea, input[type=text], input[type=email] {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); font: inherit;
+  }
+  textarea { min-height: 150px; resize: vertical; font-size: 13.5px; }
+  input[type=file] { font-size: 13px; color: var(--muted); }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 7px;
+    padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  button.secondary { background: transparent; color: var(--accent);
+                     border: 1px solid var(--line); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase;
+       letter-spacing: .5px; color: var(--muted); padding: 7px 9px;
+       border-bottom: 1px solid var(--line); }
+  td { padding: 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .table-wrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 20px;
+          font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+  .grade-direct       { background: var(--green-bg); color: var(--green); }
+  .grade-adjacent     { background: var(--amber-bg); color: var(--amber); }
+  .grade-transferable { background: var(--amber-bg); color: var(--amber); }
+  .grade-none         { background: var(--red-bg);   color: var(--red); }
+  .grade-unknown      { background: var(--blue-bg);  color: var(--blue); }
+  .kind { font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+          color: var(--muted); }
+  .verdict { padding: 14px 18px; border-radius: 10px; font-weight: 650;
+             font-size: 17px; margin-bottom: 6px; }
+  .verdict-strong_match  { background: var(--green-bg); color: var(--green); }
+  .verdict-partial_match { background: var(--amber-bg); color: var(--amber); }
+  .verdict-not_matching  { background: var(--red-bg);   color: var(--red); }
+  .banner { padding: 12px 15px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; }
+  .banner-error { background: var(--red-bg); color: var(--red); }
+  .banner-info  { background: var(--blue-bg); color: var(--blue); }
+  .flag { border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+          margin-bottom: 10px; }
+  .flag-blocker { border-left: 3px solid var(--red); }
+  .flag-warning { border-left: 3px solid var(--amber); }
+  .flag label { font-weight: 500; font-size: 14px; display: flex; gap: 9px;
+                align-items: flex-start; cursor: pointer; }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line);
+             border-top-color: var(--accent); border-radius: 50%;
+             animation: spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+         background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  ul.clean { margin: 6px 0; padding-left: 20px; }
+  ul.clean li { margin-bottom: 5px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand"><a href="/">resume-agent</a></span>
+  <nav><a href="/">New match</a></nav>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

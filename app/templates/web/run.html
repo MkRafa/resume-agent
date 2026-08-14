@@ -1,0 +1,27 @@
+{% extends "web/base.html" %}
+{% block title %}{{ run.jd_title or "Run" }} · resume-agent{% endblock %}
+{% block content %}
+
+<div id="run-body">{% include "web/_run_body.html" %}</div>
+
+<script>
+// Poll while the run is in flight. The fragment carries data-terminal once the
+// status can no longer change, which is when we stop.
+(function () {
+  const container = document.getElementById("run-body");
+  function done() {
+    return container.firstElementChild?.dataset.terminal === "true";
+  }
+  async function tick() {
+    if (done()) return;
+    try {
+      const res = await fetch("{{ url_for('run_body', run_id=run.id) }}");
+      if (res.ok) container.innerHTML = await res.text();
+    } catch (e) { /* transient; try again on the next tick */ }
+    if (!done()) setTimeout(tick, 2000);
+  }
+  if (!done()) setTimeout(tick, 2000);
+})();
+</script>
+
+{% endblock %}

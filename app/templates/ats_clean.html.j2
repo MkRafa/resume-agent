@@ -1,0 +1,83 @@
+{# ATS-safe single-column template.
+
+   Deliberately plain. No tables, no multi-column layout, no text boxes, no
+   headers/footers, no icons or graphics, standard section headings, real text.
+   Every one of those is a known way to get a resume mangled or dropped by a
+   parser, and none of them win anything with the human reading it either. #}
+<meta charset="utf-8">
+<title>{{ r.full_name or "Resume" }}</title>
+<style>
+  @page { size: {{ page_size }}; margin: 14mm 15mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 10.5pt; line-height: 1.38; color: #111; margin: 0;
+    max-width: 190mm;
+  }
+  h1 { font-size: 18pt; margin: 0 0 2pt; letter-spacing: .2pt; }
+  .contact { font-size: 9.5pt; color: #333; margin-bottom: 10pt; }
+  .contact span + span::before { content: " · "; color: #999; }
+  h2 {
+    font-size: 10pt; text-transform: uppercase; letter-spacing: .8pt;
+    border-bottom: 1px solid #bbb; padding-bottom: 2pt;
+    margin: 14pt 0 7pt;
+  }
+  .summary { margin: 0 0 2pt; }
+  .role { display: flex; justify-content: space-between; gap: 12pt; margin-top: 9pt; }
+  .role-title { font-weight: 700; }
+  .role-dates { color: #444; font-size: 9.5pt; white-space: nowrap; }
+  .company { font-size: 10pt; color: #333; }
+  ul { margin: 4pt 0 0; padding-left: 15pt; }
+  li { margin-bottom: 2.5pt; }
+  .skills { margin: 0; }
+  .edu { margin: 2pt 0; }
+  @media print { a { color: #111; text-decoration: none; } }
+</style>
+
+<h1>{{ r.full_name or "" }}</h1>
+<div class="contact">
+  {% for key in ["email", "phone", "location"] %}
+    {% if r.contact.get(key) %}<span>{{ r.contact[key] }}</span>{% endif %}
+  {% endfor %}
+  {% for link in links %}<span>{{ link }}</span>{% endfor %}
+</div>
+
+{% if r.summary %}
+<h2>Summary</h2>
+<p class="summary">{{ r.summary }}</p>
+{% endif %}
+
+{% if r.skills %}
+<h2>Skills</h2>
+<p class="skills">{{ r.skills | join(" · ") }}</p>
+{% endif %}
+
+{% if r.experience %}
+<h2>Experience</h2>
+{% for block in r.experience %}
+  <div class="role">
+    <div>
+      <div class="role-title">{{ block.role }}</div>
+      <div class="company">{{ block.company }}{% if block.location %} — {{ block.location }}{% endif %}</div>
+    </div>
+    <div class="role-dates">{{ block.start or "" }}{% if block.end %} – {{ block.end }}{% endif %}</div>
+  </div>
+  {% if block.bullets %}
+  <ul>
+    {% for bullet in block.bullets %}<li>{{ bullet.text }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+{% endfor %}
+{% endif %}
+
+{% if r.projects %}
+<h2>Projects</h2>
+<ul>
+  {% for bullet in r.projects %}<li>{{ bullet.text }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+{% if r.education %}
+<h2>Education</h2>
+{% for line in r.education %}<div class="edu">{{ line }}</div>{% endfor %}
+{% endif %}

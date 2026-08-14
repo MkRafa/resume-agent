@@ -1,0 +1,69 @@
+{% extends "web/base.html" %}
+{% block title %}{{ graph.full_name or "Profile" }} · resume-agent{% endblock %}
+{% block content %}
+
+<h1>{{ graph.full_name or "(unnamed)" }}</h1>
+<p class="muted small">
+  <code>{{ graph.identity.primary_key }}</code> · {{ years }} yrs · {{ graph.atoms | length }} facts
+  {% if graph.location %} · {{ graph.location }}{% endif %}
+</p>
+
+{% if graph.identity.keys | length > 1 %}
+<p class="small muted">
+  Also reachable as
+  {% for k in graph.identity.keys %}{% if k != graph.identity.primary_key %}<code>{{ k }}</code>{% endif %}{% endfor %}
+  — a later upload with only one of these resolves to this same profile instead of
+  creating a second one.
+</p>
+{% endif %}
+
+<h2>Career graph</h2>
+<p class="small muted">
+  The atoms every generated resume draws from. Nothing can appear on a resume that
+  isn't traceable to one of these.
+</p>
+
+{% for company, atoms in by_company.items() %}
+<div class="card">
+  <strong>{{ company }}</strong>
+  <div class="table-wrap" style="margin-top:8px">
+    <table>
+      <tr><th style="width:70px">ID</th><th>Fact</th><th style="width:110px">Ownership</th></tr>
+      {% for a in atoms %}
+      <tr>
+        <td><code>{{ a.id }}</code></td>
+        <td class="small">
+          {{ a.raw_text }}
+          {% if a.skills %}<br><span class="muted small">{{ a.skills | join(" · ") }}</span>{% endif %}
+        </td>
+        <td class="small muted">
+          {{ a.evidence_strength }}
+          {% if a.confidence == "user_claimed" %}<br><span class="pill grade-adjacent">claimed</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+{% if runs %}
+<h2>Applications</h2>
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <tr><th>Role</th><th>Verdict</th><th>When</th></tr>
+      {% for r in runs %}
+      <tr>
+        <td><a href="/runs/{{ r.id }}">{{ r.jd_title or "Untitled" }}</a>
+          {% if r.jd_company %}<span class="muted">· {{ r.jd_company }}</span>{% endif %}</td>
+        <td>{% if r.verdict %}<span class="pill verdict-{{ r.verdict }}">{{ r.verdict.replace("_"," ") }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="small muted">{{ r.created_at[:16].replace("T"," ") }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
