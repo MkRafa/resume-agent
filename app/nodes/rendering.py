@@ -15,6 +15,27 @@ from app.hooks import block_on_unresolved_flags, write_audit_log
 from app.schemas import TailoredResume
 from app.state import PipelineState
 from app.tools import keyword_coverage, resume_to_text
+from app.tools.claim_trace import summarise, trace_claims
+
+
+def _write_trace(out_dir: Path, untraced, stats: dict) -> Path:
+    import json
+
+    path = out_dir / "untraced_claims.json"
+    path.write_text(
+        json.dumps(
+            {
+                "summary": stats,
+                "items": [
+                    {"location": u.location, "kind": u.kind, "token": u.token, "text": u.text}
+                    for u in untraced
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -123,5 +144,18 @@ def render(state: PipelineState) -> dict:
     lint = ats_lint(resume, job)
     if lint:
         notes.extend(f"ATS lint: {issue}" for issue in lint)
+
+    # Deterministic second opinion on the LLM verifier. It shares nothing with
+    # that pass - arithmetic and set membership rather than judgement - so a
+    # fabrication both models find plausible still surfaces here.
+    untraced = trace_claims(resume, graph)
+    if untraced:
+        stats = summarise(untraced, resume)
+        notes.append(
+            f"Claim trace: {stats['affected_bullets']}/{stats['bullets']} bullets have "
+            f"untraceable content ({stats['by_kind']})"
+        )
+        notes.extend(f"Claim trace: {u}" for u in untraced[:8])
+        artifacts["untraced_claims"] = str(_write_trace(out_dir, untraced, stats))
 
     return {"artifacts": artifacts, "notes": notes, "out_dir": out_dir}

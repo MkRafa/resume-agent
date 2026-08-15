@@ -329,7 +329,7 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 | 2. Plumbing | Fan-out, join, routing, render guardrail, provenance — models stubbed | free | `test_pipeline.py` |
 | 3. **Verdict agreement** | Does the grader match human labels? **The eval that matters** | ~43 calls cold | `run_gold.py`, `test_gold.py` |
 | 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 22 calls | `run_verifier.py` |
-| 5. Hallucination rate | Unsupported claims per generated resume, end to end | live | *not yet built* |
+| 5. **Hallucination rate** | Can every claim on a generated resume be traced? | free | `app/tools/claim_trace.py` |
 
 ```bash
 ./.venv/bin/python -m pytest evals/ -q        # 84 tests, no API calls
@@ -375,7 +375,32 @@ escalates one — so a real fabrication cannot be filtered away.
 The cache key includes the prompt text and the model id. Without that, editing
 `verify.md` replays stale output and reports the old behaviour as the new one.
 
-Layer 5 (end-to-end hallucination rate on generated resumes) is still missing.
+### Claim tracing (layer 5)
+
+The deterministic counterpart to the verifier, and deliberately built to fail
+differently — having one model check another's output is circular, since they
+share training and blind spots, and a fabrication both find plausible sails
+through. These are arithmetic and set-membership checks:
+
+| Check | Catches |
+|---|---|
+| `orphan_bullet` | a bullet citing no facts at all |
+| `dangling_citation` | a `fact_id` that does not exist |
+| `unsourced_number` | a figure absent from the cited atoms and not derivable from them |
+| `unsourced_technology` | a named tool absent from the cited atoms |
+
+Numbers are the highest-signal check: a fabricated metric is the most damaging
+and most checkable thing a resume can contain. Percentages derived from stated
+figures are allowed — "1.8s to 640ms" genuinely supports "cut latency 64%" —
+and the specific→general technology forms match the verifier's rules, so EKS →
+"Kubernetes" is not a hallucination here either.
+
+It runs on **every render**, not just in evals, writing `untraced_claims.json`
+alongside the resume when anything fails to trace.
+
+**Measured (2026-08-15): 27 bullets across 3 generated resumes, 0 untraceable.**
+A clean result, but a small sample on synthetic profiles — the number to watch
+as the corpus grows, not yet evidence of a solved problem.
 
 ### The gold set
 
