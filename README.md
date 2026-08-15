@@ -389,8 +389,37 @@ Error weighting is asymmetric on purpose: over-generous verdicts fail the
 build, over-strict ones xfail. Sending a candidate into an application they
 cannot win costs them more than an arguable rejection they can inspect.
 
-**Known gap:** only 5 of 22 cases are `partial_match`, the hardest class.
-Weight new cases toward it.
+### Current baseline — 2026-08-15, `gemini-3.5-flash`
+
+```
+expected \ actual    no   partial  strong        Agreement      18/22 (82%)
+no                   10      ·        ·          Over-generous   0
+partial               2      2        ·          Over-strict     4
+strong                ·      2        6          Errored         0
+```
+
+**Every error is in the conservative direction.** Nothing was sent to a
+candidate as a strong match that wasn't one — the failure mode that costs them
+an application and their trust never fired.
+
+The first run of this set scored **59%** with 9 over-strict verdicts. One cause
+dominated: 13 of 14 `location` gates failed, because "Must be located in India
+(Remote)" grades `unknown` — no resume states willingness to relocate. Adding
+`location` to `UNSCORABLE_CATEGORIES` took it to 82%, re-scored offline from
+cached grades at zero API cost.
+
+The remaining four are margin cases, not bugs: two sit 3–4 points under a
+threshold (77% vs 80%, 46% vs 50%), one has a genuinely unevidenced must-have,
+and one is a label worth re-examining (`meera_x_stellar_python` fails a "5+
+years **backend**" gate on 6 years of *data* engineering — the same
+discipline-specific reasoning already accepted for `priya_x_platform_sre`).
+
+**Thresholds have deliberately not been tuned to close that gap.** Moving a
+cutoff to fit four cases out of 22 is overfitting, and it would trade away the
+zero-over-generous property that matters most.
+
+**Known gap:** only 5 of 22 cases are `partial_match`, the hardest class — and
+3 of the 4 remaining errors involve it. Weight new cases toward it.
 
 Fixtures are synthetic — never commit a real person's resume.
 
@@ -445,11 +474,11 @@ For fully local extraction, point `MODEL_EXTRACT` at an Ollama model.
 
 ## Next
 
-**Blocking everything else — calibration.** Grow the gold set toward ~30 pairs,
-weighted to `partial_match` (currently 5 of 22, and the hardest class). Then
-build the two missing eval layers: hallucination rate, and verifier
-should-flag/shouldn't-flag pairs. The verifier has been tuned twice by reading
-single outputs, which is the thing evals exist to stop.
+**Calibration — the baseline exists now (82%, 0 over-generous).** Next: grow
+the gold set toward ~30 pairs weighted to `partial_match` (3 of the 4 remaining
+errors involve it), then build the two missing eval layers — hallucination rate,
+and verifier should-flag/shouldn't-flag pairs. The verifier has been tuned twice
+by reading single outputs, which is the thing evals exist to stop.
 
 **Then, in rough order:**
 
@@ -471,8 +500,9 @@ single outputs, which is the thing evals exist to stop.
 
 ## Known limitations
 
-- **Grader calibration is unvalidated.** The gold set exists; a full clean run
-  against a capable model has not completed (free-tier quota).
+- **Grader calibration: 82% agreement, 0 over-generous** (22 cases,
+  `gemini-3.5-flash`, 2026-08-15). Good enough to build on; not yet good enough
+  to trust unsupervised. See the confusion matrix above.
 - **Verifier over-flags.** It catches real problems and still flags accurate
   specific→general naming. No eval yet.
 - **Free tier is the binding constraint** — Gemini allows 20 requests/day/model

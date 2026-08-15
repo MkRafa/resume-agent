@@ -200,6 +200,42 @@ def test_unknown_on_an_unscorable_category_passes_a_gate():
     assert len(result.open_questions) == 1
 
 
+def test_location_gate_does_not_reject_on_resume_silence():
+    """The single biggest calibration bug the first full gold run exposed.
+
+    13 of 14 location gates failed. "Must be located in India (Remote)" grades
+    'unknown' because no resume states willingness to relocate — even when the
+    resume gives an address in the right city. That alone dragged the gold set
+    to 59% agreement with 9 over-strict verdicts; excusing it took it to 82%.
+
+    Same class as the work-authorization bug — that fix was simply too narrow.
+    """
+    j = job(
+        ("r_01", "gate", "Must be located in India (Remote)", False, "location"),
+        ("r_02", "gate", "Master's degree", False, "education"),
+        ("r_03", "must", "PyTorch", False, "skill"),
+    )
+    result = compute_verdict(card(r_01="unknown", r_02="direct", r_03="direct"), j)
+
+    assert result.gates_failed == []
+    assert result.verdict == "strong_match"
+    assert any("located in India" in q for q in result.open_questions)
+
+
+def test_unscorable_gates_do_not_inflate_a_genuinely_weak_profile():
+    """Excusing location and work-auth must not rescue a candidate who fails on
+    the requirements a resume *can* speak to."""
+    j = job(
+        ("r_01", "gate", "Located in India", False, "location"),
+        ("r_02", "gate", "Authorized to work in India", False, "work_authorization"),
+        ("r_03", "gate", "5+ years backend", False, "experience"),
+        ("r_04", "must", "Go", False, "skill"),
+    )
+    result = compute_verdict(card(r_01="unknown", r_02="unknown", r_03="none", r_04="none"), j)
+    assert result.gates_failed == ["r_03"]
+    assert result.verdict == "not_matching"
+
+
 def test_unknown_cannot_be_used_to_bypass_a_scorable_gate():
     """A grader must not be able to clear any gate by declaring it unknown.
 

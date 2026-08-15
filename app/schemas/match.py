@@ -30,10 +30,18 @@ GRADE_WEIGHT: dict[Grade, float] = {
 # than a gap - and since these are usually gates, a single boilerplate line
 # ("must be authorized to work in X") would reject nearly everyone.
 #
-# These grade 'unknown' instead: they do not fail a gate and do not count
-# toward coverage. They surface as an open question for the candidate to
-# confirm, which is the honest handling - we genuinely do not know.
-UNSCORABLE_CATEGORIES = {"work_authorization"}
+# These do not fail a gate and do not count toward coverage. They surface as an
+# open question for the candidate to confirm, which is the honest handling - we
+# genuinely do not know.
+#
+# 'location' is here for the same reason, learned the hard way: the first gold
+# run scored 59% agreement with 9 over-strict verdicts, and 13 of 14 location
+# gates had failed. "Must be located in India (Remote)" grades 'unknown'
+# because no resume states willingness to relocate — even for a candidate whose
+# resume gives an address in the right city. Excusing it costs a genuine
+# location mismatch, but the candidate knows where they live; asking them beats
+# silently rejecting everyone.
+UNSCORABLE_CATEGORIES = {"work_authorization", "location"}
 
 
 class ScorecardRow(BaseModel):
