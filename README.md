@@ -350,9 +350,19 @@ accuracy figure, because they cost very different things:
 - a **false positive** blocks a truthful resume, and teaches the reviewer to
   tick every box without reading — silently turning the gate into a rubber stamp
 
-**Baseline (`llama-3.3-70b`, 2026-08-15): 0 misses / 11.** Every fabrication
-caught — invented metrics, invented technologies, `contributed`→"led" inflation,
-scale generalisation, general→specific invention.
+**Baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
+
+```
+Misses            0 / 11     fabrication that would ship on a real resume
+False positives   0 / 11     truthful resumes blocked
+Exactly correct  18 / 22     right call AND right severity
+```
+
+Every fabrication caught — invented metrics, invented technologies,
+`contributed`→"led" inflation, scale generalisation, general→specific
+invention. The four non-exact results are all soft: two clean cases drew a
+`warning` (which does not block), and two flagged cases were caught but
+over-severe or given the wrong `issue` label.
 
 False positives went **3 → 2 → 0** across a prompt restructure and then a
 deterministic filter. Two of them resisted *three* revisions of `verify.md`
