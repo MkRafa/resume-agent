@@ -13,6 +13,7 @@ from app.schemas import SelectedFacts, TailoredResume, VerifyReport
 from app.skills import load
 from app.state import PipelineState
 from app.tools import strongest_hooks
+from app.tools.verify_filter import soften_known_false_positives
 
 
 def select_facts(state: PipelineState) -> dict:
@@ -138,6 +139,11 @@ def verify(state: PipelineState) -> dict:
         ),
         temperature=0.0,
     )
+
+    # The model will not reliably honour two of the allowed transformations even
+    # when the prompt spells them out, so they are enforced in Python. This only
+    # ever downgrades blocker -> warning; nothing is deleted or escalated.
+    soften_known_false_positives(report, graph)
 
     note = (
         f"Verifier ({settings.model_verify}): {len(report.blockers)} blocker(s), "

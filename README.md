@@ -328,15 +328,44 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 | 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker | free | `test_identity/dates/keywords/verdict/quota.py` |
 | 2. Plumbing | Fan-out, join, routing, render guardrail, provenance — models stubbed | free | `test_pipeline.py` |
 | 3. **Verdict agreement** | Does the grader match human labels? **The eval that matters** | ~43 calls cold | `run_gold.py`, `test_gold.py` |
-| 4. Hallucination | Unsupported claims per resume; target zero | live | *not yet built* |
-| 5. Verifier calibration | Should-flag vs shouldn't-flag pairs | — | *not yet built* |
+| 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 22 calls | `run_verifier.py` |
+| 5. Hallucination rate | Unsupported claims per generated resume, end to end | live | *not yet built* |
 
 ```bash
 ./.venv/bin/python -m pytest evals/ -q        # 84 tests, no API calls
 ```
 
-Layers 4 and 5 are genuinely missing. The verifier has been tuned twice by
-reading single outputs — exactly the guessing an eval exists to replace.
+### Verifier eval
+
+```bash
+./.venv/bin/python evals/run_verifier.py
+./.venv/bin/python evals/run_verifier.py --offline
+```
+
+22 hand-built `(facts, bullet)` pairs — 11 that must be flagged, 11 that must
+not. The two failure modes are reported separately rather than rolled into one
+accuracy figure, because they cost very different things:
+
+- a **miss** puts a fabricated claim on a real job application
+- a **false positive** blocks a truthful resume, and teaches the reviewer to
+  tick every box without reading — silently turning the gate into a rubber stamp
+
+**Baseline (`llama-3.3-70b`, 2026-08-15): 0 misses / 11.** Every fabrication
+caught — invented metrics, invented technologies, `contributed`→"led" inflation,
+scale generalisation, general→specific invention.
+
+False positives went **3 → 2 → 0** across a prompt restructure and then a
+deterministic filter. Two of them resisted *three* revisions of `verify.md`
+despite the prompt naming them with the exact example, which is the point at
+which prompt engineering stops being the right tool:
+`app/tools/verify_filter.py` enforces those two rules in Python instead. It only
+ever downgrades `blocker` → `warning` — never suppresses a flag, never
+escalates one — so a real fabrication cannot be filtered away.
+
+The cache key includes the prompt text and the model id. Without that, editing
+`verify.md` replays stale output and reports the old behaviour as the new one.
+
+Layer 5 (end-to-end hallucination rate on generated resumes) is still missing.
 
 ### The gold set
 
