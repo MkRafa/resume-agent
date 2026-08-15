@@ -17,7 +17,9 @@ the cost of the first.
 from __future__ import annotations
 
 import json
+import os
 import re
+import threading
 import time
 from typing import Any, TypeVar
 
@@ -160,6 +162,28 @@ MAX_TOKENS_BY_NODE = {
 }
 DEFAULT_MAX_TOKENS = 16000
 
+# Groq counts max_tokens against tokens-per-minute (12k on the free tier), so a
+# node ceiling sized for Gemini rejects the request outright with "Request too
+# large" before the model ever runs. Cap per provider and take the lower bound.
+PROVIDER_MAX_TOKENS = {"groq": 7000}
+
+# Minimum gap between calls. Providers cap requests-per-minute as well as
+# per-day, and firing a fallback chain back-to-back burns the RPM allowance in
+# seconds — every model then 429s at once and looks like daily exhaustion.
+MIN_CALL_INTERVAL = float(os.getenv("MIN_CALL_INTERVAL_SECONDS", "4"))
+_PACE_LOCK = threading.Lock()
+_last_call_at = 0.0
+
+
+def _pace() -> None:
+    """Block until MIN_CALL_INTERVAL has elapsed since the previous call."""
+    global _last_call_at
+    with _PACE_LOCK:
+        wait = MIN_CALL_INTERVAL - (time.monotonic() - _last_call_at)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at = time.monotonic()
+
 
 def _raw_call(
     model: str,
@@ -172,6 +196,11 @@ def _raw_call(
     import litellm
 
     litellm.drop_params = True  # providers vary in what they accept
+    provider_cap = PROVIDER_MAX_TOKENS.get(model.split("/", 1)[0].lower())
+    if provider_cap:
+        max_tokens = min(max_tokens, provider_cap)
+
+    _pace()
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,

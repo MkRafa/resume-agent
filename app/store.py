@@ -164,11 +164,19 @@ def get_profile(key: str) -> tuple[CareerGraph, float] | None:
 def list_profiles() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT key, full_name, years, updated_at, "
+            "SELECT key, full_name, years, updated_at, graph_json, "
             "(SELECT COUNT(*) FROM runs r WHERE r.profile_key = p.key) AS run_count "
             "FROM profiles p ORDER BY updated_at DESC"
         ).fetchall()
-    return [dict(r) for r in rows]
+
+    out = []
+    for row in rows:
+        entry = {k: row[k] for k in row.keys() if k != "graph_json"}
+        # Cheap enough at prototype scale; if the profile list ever gets long,
+        # denormalise atom_count into its own column rather than parsing here.
+        entry["atom_count"] = len(CareerGraph.model_validate_json(row["graph_json"]).atoms)
+        out.append(entry)
+    return out
 
 
 # --------------------------------------------------------------------------

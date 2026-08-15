@@ -27,6 +27,31 @@ from app.state import new_state
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pipeline")
 _LOCK = threading.Lock()
 
+# Node -> what the user sees. Streaming the graph means the UI shows the stage
+# the run is actually in, rather than one static label for 60 seconds.
+STAGE_LABELS: dict[str, str] = {
+    "intake_profile": "Reading the profile",
+    "intake_jd": "Reading the job description",
+    "build_career_graph": "Building the career graph",
+    "parse_jd": "Parsing requirements",
+    "match": "Grading evidence",
+    "gap_report": "Analysing gaps",
+    "select_facts": "Selecting the strongest facts",
+    "tailor": "Writing the resume",
+    "verify": "Verifying every claim",
+    "render": "Rendering",
+}
+
+# Ordered for the progress stepper in the UI.
+STAGE_ORDER: list[str] = [
+    "Reading the profile",
+    "Building the career graph",
+    "Grading evidence",
+    "Writing the resume",
+    "Verifying every claim",
+    "Rendering",
+]
+
 
 def submit(
     run_id: str,
@@ -108,7 +133,17 @@ def _execute(run_id: str, **kwargs) -> None:
             phone_hint=kwargs["phone"],
             out_dir=_out_dir(run_id),
         )
-        final = PIPELINE.invoke(state)
+        # Stream rather than invoke: "updates" names the node that just ran (so
+        # the UI can show real progress), "values" carries the accumulated
+        # state, whose last emission is the final result.
+        final: dict = {}
+        for mode, chunk in PIPELINE.stream(state, stream_mode=["updates", "values"]):
+            if mode == "updates":
+                for node in chunk:
+                    if label := STAGE_LABELS.get(node):
+                        store.update_run(run_id, stage=label)
+            elif mode == "values":
+                final = chunk
     except (QuotaExhausted, ModelCallError) as exc:
         stage, headline, detail = _classify(exc)
         store.update_run(

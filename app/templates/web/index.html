@@ -2,16 +2,16 @@
 {% block content %}
 
 <h1>Match a candidate to a job</h1>
-<p class="muted small">
-  Grades the profile against every requirement, then tailors a resume — with each
-  bullet traceable to a fact you actually supplied.
+<p class="lede">
+  Grades the profile against every requirement with cited evidence, then tailors a
+  resume where each bullet traces back to a fact the candidate actually supplied.
 </p>
 
 {% if credential_problems %}
 <div class="banner banner-error">
-  <strong>No model credentials.</strong>
-  <ul class="clean">{% for p in credential_problems %}<li>{{ p }}</li>{% endfor %}</ul>
-  Add them to <code>.env</code> and restart.
+  <strong>No model credentials configured</strong>
+  <ul>{% for p in credential_problems %}<li>{{ p }}</li>{% endfor %}</ul>
+  Add them to <code>.env</code> and restart the server.
 </div>
 {% endif %}
 
@@ -20,59 +20,79 @@
 <form method="post" action="/runs" enctype="multipart/form-data">
   <div class="grid2">
     <div class="card">
-      <label for="profile_text">Candidate profile</label>
-      <textarea id="profile_text" name="profile_text"
-                placeholder="Paste a resume, or attach a file below…"></textarea>
-      <p class="small muted" style="margin:10px 0 4px">or attach (PDF, DOCX, TXT, MD, image)</p>
-      <input type="file" name="profile_file"
-             accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+      <h3>Candidate profile</h3>
+      <p class="small muted" style="margin:0 0 var(--sp-3)">
+        A resume, LinkedIn export, or anything describing their experience.
+      </p>
+      <textarea name="profile_text" placeholder="Paste the resume here…"></textarea>
+      <div class="filedrop">
+        <span class="tiny muted">or attach</span>
+        <input type="file" name="profile_file"
+               accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+      </div>
     </div>
+
     <div class="card">
-      <label for="jd_text">Job description</label>
-      <textarea id="jd_text" name="jd_text"
-                placeholder="Paste the job description, or attach a file below…"></textarea>
-      <p class="small muted" style="margin:10px 0 4px">or attach</p>
-      <input type="file" name="jd_file"
-             accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+      <h3>Job description</h3>
+      <p class="small muted" style="margin:0 0 var(--sp-3)">
+        The full posting — requirements, nice-to-haves and all.
+      </p>
+      <textarea name="jd_text" placeholder="Paste the job description here…"></textarea>
+      <div class="filedrop">
+        <span class="tiny muted">or attach</span>
+        <input type="file" name="jd_file"
+               accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+      </div>
     </div>
   </div>
 
-  <div class="card">
-    <p class="small muted" style="margin-top:0">
-      Profiles are identified by email, falling back to phone. Fill these in only if
-      the resume itself doesn't contain them — otherwise they're read from the document.
+  <div class="card" style="margin-top:var(--sp-4)">
+    <h3>Identity <span class="muted small" style="font-weight:400">— optional</span></h3>
+    <p class="small muted" style="margin:0 0 var(--sp-4)">
+      Profiles are keyed by email, falling back to phone. These are read from the
+      document automatically — fill them in only if it has no contact details.
     </p>
     <div class="grid2">
       <div>
-        <label for="email">Email <span class="muted">(optional)</span></label>
+        <label for="email">Email</label>
         <input type="email" id="email" name="email" placeholder="candidate@example.com">
       </div>
       <div>
-        <label for="phone">Phone <span class="muted">(fallback)</span></label>
+        <label for="phone">Phone <span class="muted" style="font-weight:400">(fallback)</span></label>
         <input type="text" id="phone" name="phone" placeholder="+91 98765 43210">
       </div>
     </div>
-    <div style="margin-top:16px"><button type="submit">Run match</button></div>
+    <div class="row" style="margin-top:var(--sp-5)">
+      <button type="submit">Run match</button>
+      <span class="small muted">Takes 30–60 seconds — seven model calls.</span>
+    </div>
   </div>
 </form>
 
 {% if runs %}
 <h2>Recent runs</h2>
-<div class="card" style="padding:0">
+<div class="card card-flush">
   <div class="table-wrap">
     <table>
-      <tr><th>Role</th><th>Verdict</th><th>Status</th><th>When</th></tr>
+      <thead><tr><th>Role</th><th>Verdict</th><th>Status</th><th>When</th></tr></thead>
+      <tbody>
       {% for r in runs %}
       <tr>
-        <td><a href="/runs/{{ r.id }}">{{ r.jd_title or "Untitled" }}</a>
-          {% if r.jd_company %}<span class="muted">· {{ r.jd_company }}</span>{% endif %}</td>
-        <td>{% if r.verdict %}
-            <span class="pill verdict-{{ r.verdict }}">{{ r.verdict.replace("_", " ") }}</span>
-            {% else %}<span class="muted">—</span>{% endif %}</td>
-        <td class="small muted">{{ r.status }}</td>
+        <td>
+          <a href="/runs/{{ r.id }}">{{ r.jd_title or "Untitled run" }}</a>
+          {% if r.jd_company %}<div class="tiny muted">{{ r.jd_company }}</div>{% endif %}
+        </td>
+        <td>
+          {% if r.verdict %}
+            <span class="chip {{ {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'}[r.verdict] }}">
+              {{ r.verdict.replace("_", " ") }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="small muted">{{ r.status.replace("_", " ") }}</td>
         <td class="small muted">{{ r.created_at[:16].replace("T", " ") }}</td>
       </tr>
       {% endfor %}
+      </tbody>
     </table>
   </div>
 </div>
@@ -80,25 +100,34 @@
 
 {% if profiles %}
 <h2>Career graphs</h2>
-<div class="card" style="padding:0">
+<div class="card card-flush">
   <div class="table-wrap">
     <table>
-      <tr><th>Candidate</th><th>Key</th><th>Experience</th><th>Runs</th></tr>
+      <thead><tr><th>Candidate</th><th>Profile key</th><th>Experience</th><th>Facts</th><th>Runs</th></tr></thead>
+      <tbody>
       {% for p in profiles %}
       <tr>
         <td><a href="/profiles/{{ p.key }}">{{ p.full_name or "(unnamed)" }}</a></td>
-        <td class="small muted">{{ p.key }}</td>
+        <td class="small muted"><code>{{ p.key }}</code></td>
         <td class="small">{{ p.years }} yrs</td>
+        <td class="small muted">{{ p.atom_count }}</td>
         <td class="small muted">{{ p.run_count }}</td>
       </tr>
       {% endfor %}
+      </tbody>
     </table>
   </div>
 </div>
-<p class="small muted">
-  A profile accumulates across applications — the graph gets richer each time,
-  so later matches are better than the first.
+<p class="small muted" style="margin-top:var(--sp-3)">
+  A profile accumulates across applications, so a returning candidate's second
+  match is better than their first.
 </p>
+{% endif %}
+
+{% if not runs and not profiles %}
+<div class="card empty" style="margin-top:var(--sp-6)">
+  <p style="margin:0">No runs yet. Paste a resume and a job description above to start.</p>
+</div>
 {% endif %}
 
 {% endblock %}
