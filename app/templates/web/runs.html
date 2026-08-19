@@ -1,0 +1,8 @@
+{% extends "web/base.html" %}
+{% block title %}Runs · resume-agent{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+<p class="lede">Every match, with the verdict the rule computed from its graded rows.</p>
+{% if runs %}{% include "web/_runs_table.html" %}
+{% else %}<div class="card empty">No runs yet. <a href="/">Start one</a>.</div>{% endif %}
+{% endblock %}

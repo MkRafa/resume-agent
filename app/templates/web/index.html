@@ -9,48 +9,51 @@
 
 {% if credential_problems %}
 <div class="banner banner-error">
-  <strong>No model credentials configured</strong>
-  <ul>{% for p in credential_problems %}<li>{{ p }}</li>{% endfor %}</ul>
-  Add them to <code>.env</code> and restart the server.
+  <span class="eyebrow">Config</span>
+  <div>
+    <strong>No model credentials.</strong>
+    <ul class="clean">{% for p in credential_problems %}<li>{{ p }}</li>{% endfor %}</ul>
+  </div>
 </div>
 {% endif %}
 
-{% if error %}<div class="banner banner-error">{{ error }}</div>{% endif %}
+{% if error %}
+<div class="banner banner-error"><span class="eyebrow">Error</span><div>{{ error }}</div></div>
+{% endif %}
 
 <form method="post" action="/runs" enctype="multipart/form-data">
   <div class="grid2">
-    <div class="card">
+    <div class="card card-pad">
       <h3>Candidate profile</h3>
       <p class="small muted" style="margin:0 0 var(--sp-3)">
         A resume, LinkedIn export, or anything describing their experience.
       </p>
-      <textarea name="profile_text" placeholder="Paste the resume here…"></textarea>
+      <textarea name="profile_text" placeholder="Paste the resume…"></textarea>
       <div class="filedrop">
-        <span class="tiny muted">or attach</span>
-        <input type="file" name="profile_file"
-               accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+        <span class="eyebrow">or attach</span>
+        <input type="file" name="profile_file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
       </div>
     </div>
 
-    <div class="card">
+    <div class="card card-pad">
       <h3>Job description</h3>
       <p class="small muted" style="margin:0 0 var(--sp-3)">
         The full posting — requirements, nice-to-haves and all.
       </p>
-      <textarea name="jd_text" placeholder="Paste the job description here…"></textarea>
+      <textarea name="jd_text" placeholder="Paste the job description…"></textarea>
       <div class="filedrop">
-        <span class="tiny muted">or attach</span>
-        <input type="file" name="jd_file"
-               accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
+        <span class="eyebrow">or attach</span>
+        <input type="file" name="jd_file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp">
       </div>
     </div>
   </div>
 
-  <div class="card" style="margin-top:var(--sp-4)">
-    <h3>Identity <span class="muted small" style="font-weight:400">— optional</span></h3>
+  <div class="card card-pad" style="margin-top:var(--sp-3)">
+    <h3>Identity <span class="muted" style="font-weight:400">— optional</span></h3>
     <p class="small muted" style="margin:0 0 var(--sp-4)">
-      Profiles are keyed by email, falling back to phone. These are read from the
-      document automatically — fill them in only if it has no contact details.
+      Profiles are keyed by email, falling back to phone, and both are kept as
+      lookup keys. Read from the document automatically — fill these in only if it
+      has no contact details.
     </p>
     <div class="grid2">
       <div>
@@ -62,71 +65,32 @@
         <input type="text" id="phone" name="phone" placeholder="+91 98765 43210">
       </div>
     </div>
-    <div class="row" style="margin-top:var(--sp-5)">
+    <div class="row" style="margin-top:var(--sp-4)">
       <button type="submit">Run match</button>
-      <span class="small muted">Takes 30–60 seconds — seven model calls.</span>
+      <span class="eyebrow">30–60s · seven model calls</span>
     </div>
   </div>
 </form>
 
 {% if runs %}
-<h2>Recent runs</h2>
-<div class="card card-flush">
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Role</th><th>Verdict</th><th>Status</th><th>When</th></tr></thead>
-      <tbody>
-      {% for r in runs %}
-      <tr>
-        <td>
-          <a href="/runs/{{ r.id }}">{{ r.jd_title or "Untitled run" }}</a>
-          {% if r.jd_company %}<div class="tiny muted">{{ r.jd_company }}</div>{% endif %}
-        </td>
-        <td>
-          {% if r.verdict %}
-            <span class="chip {{ {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'}[r.verdict] }}">
-              {{ r.verdict.replace("_", " ") }}</span>
-          {% else %}<span class="muted">—</span>{% endif %}
-        </td>
-        <td class="small muted">{{ r.status.replace("_", " ") }}</td>
-        <td class="small muted">{{ r.created_at[:16].replace("T", " ") }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<div class="section-head">
+  <h2>Recent runs</h2>
+  <span class="note">verdicts are computed by rule from graded rows</span>
 </div>
+{% include "web/_runs_table.html" %}
 {% endif %}
 
 {% if profiles %}
-<h2>Career graphs</h2>
-<div class="card card-flush">
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Candidate</th><th>Profile key</th><th>Experience</th><th>Facts</th><th>Runs</th></tr></thead>
-      <tbody>
-      {% for p in profiles %}
-      <tr>
-        <td><a href="/profiles/{{ p.key }}">{{ p.full_name or "(unnamed)" }}</a></td>
-        <td class="small muted"><code>{{ p.key }}</code></td>
-        <td class="small">{{ p.years }} yrs</td>
-        <td class="small muted">{{ p.atom_count }}</td>
-        <td class="small muted">{{ p.run_count }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<div class="section-head">
+  <h2>Career graphs</h2>
+  <span class="note">a profile accumulates across applications</span>
 </div>
-<p class="small muted" style="margin-top:var(--sp-3)">
-  A profile accumulates across applications, so a returning candidate's second
-  match is better than their first.
-</p>
+{% include "web/_profiles_table.html" %}
 {% endif %}
 
 {% if not runs and not profiles %}
-<div class="card empty" style="margin-top:var(--sp-6)">
-  <p style="margin:0">No runs yet. Paste a resume and a job description above to start.</p>
+<div class="card empty" style="margin-top:var(--sp-5)">
+  No runs yet. Paste a resume and a job description above to start.
 </div>
 {% endif %}
 

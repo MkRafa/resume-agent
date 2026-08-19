@@ -1,0 +1,11 @@
+{% extends "web/base.html" %}
+{% block title %}Career graphs · resume-agent{% endblock %}
+{% block content %}
+<h1>Career graphs</h1>
+<p class="lede">
+  Keyed by email, falling back to phone — both retained as lookup keys, so a
+  returning candidate reconciles to one profile instead of forking a second.
+</p>
+{% if profiles %}{% include "web/_profiles_table.html" %}
+{% else %}<div class="card empty">No profiles yet. <a href="/">Run a match</a>.</div>{% endif %}
+{% endblock %}

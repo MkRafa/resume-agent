@@ -1,0 +1,104 @@
+{% extends "web/base.html" %}
+{% block title %}System · resume-agent{% endblock %}
+{% block content %}
+
+<h1>System</h1>
+<p class="lede">
+  Model routing and the current eval baseline — both read live from config and the
+  recorded gold results, so this page can't drift from what the pipeline actually does.
+</p>
+
+{% if credential_problems %}
+<div class="banner banner-error">
+  <span class="eyebrow">Config</span>
+  <div><ul class="clean">{% for p in credential_problems %}<li>{{ p }}</li>{% endfor %}</ul></div>
+</div>
+{% endif %}
+
+<div class="section-head">
+  <h2>Model routing</h2>
+  <span class="note">one model per node · the verifier is deliberately a different family</span>
+</div>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:100px">Node</th><th>Does</th><th>Model</th></tr></thead>
+      <tbody>
+      {% for node, does, model in nodes %}
+      <tr>
+        <td class="mono" style="color:var(--ink-1)">{{ node }}</td>
+        <td class="tiny muted">{{ does }}</td>
+        <td>
+          <code>{{ model }}</code>
+          {% if node == "verify" %}
+            <span class="chip g-unknown" style="margin-left:6px">cross-family</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card card-pad" style="margin-top:var(--sp-3)">
+  <div class="breakdown">
+    <span><b>Fallbacks</b> {% for m in fallbacks %}<code>{{ m.strip() }}</code> {% else %}none{% endfor %}</span>
+    <span><b>PII redaction</b> {{ "on" if redact else "off" }}</span>
+  </div>
+  <p class="small muted" style="margin:var(--sp-3) 0 0">
+    Failover rotates across models before sleeping — free-tier quota is per model,
+    so when one is exhausted a sibling is usually free.
+  </p>
+</div>
+
+<div class="section-head" id="evals">
+  <h2>Gold set</h2>
+  <span class="note">verdict agreement · over-generous errors are the expensive ones</span>
+</div>
+
+{% if summary.total %}
+<div class="card card-pad">
+  <div class="breakdown" style="font-size:12px">
+    <span><b>{{ summary.agree }}/{{ summary.total }}</b> agreement
+      ({{ (100 * summary.agree / summary.total) | round | int }}%)</span>
+    <span style="color:{{ 'var(--neg)' if summary.generous else 'var(--pos)' }}">
+      <b style="color:inherit">{{ summary.generous }}</b> over-generous</span>
+    <span><b>{{ summary.strict }}</b> over-strict</span>
+  </div>
+  <p class="small muted" style="margin:var(--sp-3) 0 0">
+    Over-generous sends a candidate into an application they can't win. Over-strict is
+    arguable and inspectable — so the two are never averaged into one score.
+  </p>
+</div>
+
+<div class="card" style="margin-top:var(--sp-3)">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Case</th><th style="width:110px">Expected</th><th style="width:110px">Actual</th><th style="width:90px">Coverage</th></tr></thead>
+      <tbody>
+      {% for r in gold %}
+      <tr>
+        <td class="mono tiny" style="color:var(--ink-2)">{{ r.id }}</td>
+        <td><span class="chip {{ {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'}[r.expected] }}">
+          {{ r.expected.replace("_"," ") }}</span></td>
+        <td>
+          <span class="chip {{ {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'}[r.actual] }}">
+            {{ r.actual.replace("_"," ") }}</span>
+          {% if r.drift > 0 %}<div class="tiny" style="color:var(--neg); margin-top:4px">over-generous</div>
+          {% elif r.drift < 0 %}<div class="tiny" style="color:var(--warn); margin-top:4px">over-strict</div>{% endif %}
+        </td>
+        <td class="mono tiny muted">{{ (r.coverage * 100) | round | int }}%</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card empty">
+  No gold results recorded. Run <code>evals/run_gold.py</code> to populate this.
+</div>
+{% endif %}
+
+{% endblock %}

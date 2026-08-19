@@ -1,205 +1,256 @@
 {% set terminal = run.status in ("done", "failed", "needs_review") %}
-{% set vmap = {"strong_match": "g-direct", "partial_match": "g-adjacent", "not_matching": "g-none"} %}
+{% set sc = run.scorecard %}
 <div data-terminal="{{ 'true' if terminal else 'false' }}">
 
-<h1>{{ run.jd_title or "Job match" }}</h1>
-<div class="stat-row">
-  {% if run.jd_company %}<span class="stat">{{ run.jd_company }}</span>{% endif %}
-  {% if run.profile_key %}
-    <span class="stat"><a href="/profiles/{{ run.profile_key }}">{{ run.profile_key }}</a></span>
+<div style="display:flex; align-items:flex-start; gap:var(--sp-4); flex-wrap:wrap">
+  <div style="min-width:0; flex:1">
+    <h1>{{ run.jd_title or "Job match" }}</h1>
+    <div class="meta">
+      {% if run.jd_company %}<span>{{ run.jd_company }}</span><span class="sep">/</span>{% endif %}
+      {% if run.profile_key %}
+        <a href="/profiles/{{ run.profile_key }}">{{ run.profile_key }}</a><span class="sep">/</span>
+      {% endif %}
+      {% if sc %}<span>{{ sc.rows | length }} requirements graded</span><span class="sep">/</span>{% endif %}
+      <span>run_{{ run.id }}</span>
+    </div>
+  </div>
+  {% if sc and sc.verdict %}
+    <span class="chip {{ {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'}[sc.verdict] }}"
+          style="font-size:12.5px; padding:5px 12px">{{ sc.verdict.replace("_"," ") }}</span>
   {% endif %}
-  {% if run.scorecard %}<span class="stat"><b>{{ run.scorecard.rows | length }}</b> requirements graded</span>{% endif %}
 </div>
 
-{# ── in flight ───────────────────────────────────────────────────────────── #}
 {% if run.status in ("queued", "running") %}
-  <div class="card">
-    <div class="row" style="gap:var(--sp-3)">
+  <div class="card card-pad" style="margin-top:var(--sp-4)">
+    <div class="row">
       <span class="spinner"></span>
-      <strong>{{ run.stage or "Starting" }}</strong>
+      <strong style="color:var(--ink-0)">{{ run.stage or "Working" }}…</strong>
     </div>
-    <div class="stepper">
-      {% set stages = ["Reading the profile", "Building the career graph", "Grading evidence",
-                       "Writing the resume", "Verifying every claim", "Rendering"] %}
-      {% set current = stages.index(run.stage) if run.stage in stages else -1 %}
-      {% for s in stages %}
-        <span class="step {% if current > loop.index0 %}done{% elif current == loop.index0 %}active{% endif %}">
-          <span class="step-dot"></span>{{ s }}
-        </span>
-      {% endfor %}
-    </div>
-    <p class="small muted" style="margin:var(--sp-4) 0 0">
-      Seven model calls — extraction, requirement parsing, grading, selection,
-      writing and an independent verification pass. This page updates itself.
+    <p class="small muted" style="margin:var(--sp-2) 0 0">
+      Extraction, requirement parsing, grading, tailoring and verification each call a
+      model. This page updates itself.
     </p>
   </div>
 {% endif %}
 
-{# ── failure ─────────────────────────────────────────────────────────────── #}
 {% if run.status == "failed" %}
-  <div class="banner banner-error">
-    <strong>{{ run.stage or "Failed" }}</strong>
-    <p style="margin:var(--sp-2) 0 0">{{ run.error }}</p>
-    {% if run.notes %}
-      <details style="margin-top:var(--sp-3)">
-        <summary class="small">Provider response</summary>
-        <pre class="tiny" style="white-space:pre-wrap;margin:var(--sp-2) 0 0;
-             max-height:240px;overflow:auto">{{ run.notes | join("\n") }}</pre>
-      </details>
-    {% endif %}
+  <div class="banner banner-error" style="margin-top:var(--sp-4)">
+    <span class="eyebrow">{{ run.stage or "Failed" }}</span>
+    <div>
+      {{ run.error }}
+      {% if run.notes %}
+        <details style="margin-top:var(--sp-2)">
+          <summary class="eyebrow" style="cursor:pointer">Provider response</summary>
+          <pre class="mono tiny" style="white-space:pre-wrap; margin:var(--sp-2) 0 0;
+               max-height:240px; overflow:auto; color:var(--ink-5)">{{ run.notes | join("\n") }}</pre>
+        </details>
+      {% endif %}
+    </div>
   </div>
-  <a class="btn secondary" href="/">Start a new match</a>
+  <a href="/" class="btn secondary" style="margin-top:var(--sp-3)">Start a new match</a>
 {% endif %}
 
-{# ── verdict ─────────────────────────────────────────────────────────────── #}
-{% if run.scorecard and run.scorecard.verdict %}
-  {% set v = run.scorecard.verdict %}
-  <div class="verdict verdict-{{ v }}">
-    <div class="verdict-body">
-      <div class="verdict-label">{{ v.replace("_", " ") | title }}</div>
-      <ul>{% for reason in run.scorecard.verdict_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
-    </div>
-    <div class="meter" style="color:var({{ '--pos' if v == 'strong_match' else '--warn' if v == 'partial_match' else '--neg' }})">
-      <div class="meter-val">{{ (run.scorecard.must_coverage * 100) | round | int }}%</div>
-      <div class="meter-bar">
-        <div class="meter-fill" style="width:{{ (run.scorecard.must_coverage * 100) | round | int }}%"></div>
+{# ── Verdict ─────────────────────────────────────────────────────────── #}
+{% if sc and sc.verdict %}
+<div class="card" style="margin-top:var(--sp-4)">
+  <div class="card-head">Verdict <span class="sub">· deterministic, computed from graded rows</span></div>
+  <div class="card-pad">
+    <div class="verdict-title v-{{ sc.verdict }}">{{ sc.verdict.replace("_"," ") | title }}</div>
+    <ul class="clean small muted" style="margin-top:var(--sp-2)">
+      {% for r in sc.verdict_reasons %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+
+    <div style="margin-top:var(--sp-4); max-width:520px">
+      <div class="meter">
+        <span class="meter-track">
+          <span class="meter-fill fill-{{ sc.verdict }}"
+                style="width:{{ (sc.must_coverage * 100) | round | int }}%"></span>
+        </span>
+        <span class="meter-val v-{{ sc.verdict }}">{{ (sc.must_coverage * 100) | round | int }}%</span>
       </div>
-      <div class="meter-cap">Must-have coverage</div>
+      <div class="eyebrow" style="margin-top:6px; letter-spacing:.04em; text-transform:none">
+        Weighted must-have coverage — 50% is the partial floor, 80% the strong threshold.
+      </div>
+    </div>
+
+    <div class="breakdown" style="margin-top:var(--sp-4)">
+      <span><b>{{ breakdown.direct }}</b> direct · weight 1.0</span>
+      <span><b>{{ breakdown.adjacent }}</b> adjacent · weight 0.6 / 0.3</span>
+      <span><b>{{ breakdown.absent }}</b> absent · weight 0</span>
+      <span><b>{{ breakdown.excluded }}</b> excluded · boilerplate, unscorable</span>
     </div>
   </div>
+</div>
 {% endif %}
 
-{% if run.scorecard and run.scorecard.open_questions %}
-  <div class="banner banner-info" style="margin-top:var(--sp-4)">
-    <strong>Needs your confirmation</strong>
-    <p class="small" style="margin:var(--sp-1) 0 0">
-      A resume can't show these either way, so they're counted neither for nor against.
-    </p>
-    <ul>{% for q in run.scorecard.open_questions %}<li>{{ q }}</li>{% endfor %}</ul>
-  </div>
-{% endif %}
-
-{# ── scorecard ───────────────────────────────────────────────────────────── #}
-{% if rows %}
-<h2>Evidence scorecard</h2>
-<div class="card card-flush">
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Requirement</th><th>Grade</th><th>Evidence</th><th>Reasoning</th></tr></thead>
-      <tbody>
-      {% for item in rows %}
-      <tr>
-        <td style="min-width:200px">
-          <div>{{ item.req.text }}</div>
-          <span class="kind {% if item.req.kind == 'gate' %}kind-gate{% endif %}">{{ item.req.kind }}</span>
-          {% if item.req.boilerplate %}<span class="kind"> · boilerplate</span>{% endif %}
-        </td>
-        <td><span class="chip g-{{ item.row.grade }}">{{ item.row.grade }}</span></td>
-        <td class="small muted" style="min-width:96px">
-          {% for fid in item.row.evidence_fact_ids %}<code>{{ fid }}</code>
-          {% else %}<span class="muted">—</span>{% endfor %}
-        </td>
-        <td class="small muted">{{ item.row.rationale }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+{% if sc and sc.open_questions %}
+<div class="banner banner-info" style="margin-top:var(--sp-3)">
+  <span class="eyebrow">Confirm</span>
+  <div>
+    Things a resume can never show, counted neither for nor against:
+    {% for q in sc.open_questions %}
+      <div style="color:var(--ink-2); margin-top:4px">{{ q }}</div>
+    {% endfor %}
   </div>
 </div>
 {% endif %}
 
-{# ── gaps ────────────────────────────────────────────────────────────────── #}
-{% if run.scorecard and run.scorecard.gaps %}
-<h2>Gaps</h2>
-{% set sev = {"dealbreaker": "g-none", "significant": "g-adjacent", "coachable": "g-direct"} %}
-{% for gap in run.scorecard.gaps %}
-  <div class="card">
-    <span class="chip {{ sev.get(gap.severity, 'g-unknown') }}">{{ gap.severity }}</span>
-    <p style="margin:var(--sp-3) 0 0">{{ gap.explanation }}</p>
-    {% if gap.how_to_address %}
-      <p class="small muted" style="margin:var(--sp-2) 0 0">
-        <strong style="color:var(--ink-2)">What to do:</strong> {{ gap.how_to_address }}
-      </p>
-    {% endif %}
-  </div>
-{% endfor %}
-{% endif %}
+{# ── Evidence scorecard ──────────────────────────────────────────────── #}
+{% if groups %}
+<div class="section-head">
+  <h2>Evidence scorecard</h2>
+  <span class="note">every grade cites atom ids · a grade with no citation is invalid</span>
+</div>
 
-{% if run.scorecard and run.scorecard.adjacent_roles %}
-<h2>Roles this profile would match</h2>
 <div class="card">
-  <ul class="clean">{% for r in run.scorecard.adjacent_roles %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% for g in groups %}
+    <div class="card-head" {% if not loop.first %}style="border-top:1px solid var(--line)"{% endif %}>
+      <span style="color:{{ 'var(--neg)' if g.kind == 'gate' else ('var(--ink-3)' if g.kind == 'must' else 'var(--ink-6)') }}">
+        {{ g.title }}</span>
+      <span class="sub">— {{ g.note }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+        {% for it in g.rows %}
+        <tr>
+          <td style="width:46%">
+            <span class="strong" style="color:{{ 'var(--ink-6)' if it.excluded else 'var(--ink-1)' }}">
+              {{ it.req.text }}</span>
+            <div class="tiny muted" style="margin-top:4px">{{ it.row.rationale }}</div>
+          </td>
+          <td style="width:118px">
+            {% if it.excluded %}
+              <span class="chip g-{{ it.row.grade }}">{{ it.row.grade }}</span>
+              <div style="margin-top:5px"><span class="chip g-excluded">excluded</span></div>
+            {% else %}
+              <span class="chip g-{{ it.row.grade }}">{{ it.row.grade }}</span>
+            {% endif %}
+          </td>
+          <td style="width:130px">
+            {% for fid in it.row.evidence_fact_ids %}
+              <code>{{ fid }}</code>{% if not loop.last %} {% endif %}
+            {% else %}
+              <span class="eyebrow" style="color:var(--ink-6)">no citation</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endfor %}
 </div>
 {% endif %}
 
-{# ── human review gate ───────────────────────────────────────────────────── #}
+{# ── Gaps ────────────────────────────────────────────────────────────── #}
+{% if sc and sc.gaps %}
+<div class="section-head"><h2>Gaps</h2><span class="note">what to do about each</span></div>
+<div class="card">
+  {% for gap in sc.gaps %}
+  <div class="flag">
+    <span class="chip {{ {'dealbreaker':'g-none','significant':'g-adjacent','coachable':'g-direct'}[gap.severity] }}"
+          style="flex:none">{{ gap.severity }}</span>
+    <div class="flag-body">
+      <div style="color:var(--ink-2)">{{ gap.explanation }}</div>
+      {% if gap.how_to_address %}
+        <div class="flag-why"><span class="eyebrow">Do</span> {{ gap.how_to_address }}</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if sc and sc.adjacent_roles %}
+<div class="section-head"><h2>Roles this profile would match</h2></div>
+<div class="card card-pad">
+  <ul class="clean small">{% for r in sc.adjacent_roles %}<li>{{ r }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{# ── Review gate ─────────────────────────────────────────────────────── #}
 {% if run.status == "needs_review" and run.verify %}
-<h2>Review before release</h2>
+<div class="section-head">
+  <h2>Review gate</h2>
+  <span class="note">{{ blockers_resolved }} of {{ blockers_total }} blockers resolved</span>
+</div>
 <div class="card">
-  <p class="small" style="margin:0 0 var(--sp-4);color:var(--ink-2)">
-    A second model — a different family from the one that wrote this, and one that
-    never saw the job description — checked every claim against the career facts.
-    It couldn't trace the items below. <strong>Nothing is released until you decide
-    on each one.</strong>
-  </p>
+  <div class="card-pad" style="border-bottom:1px solid var(--line)">
+    <p class="small muted" style="margin:0">
+      A second model — a different family, and one that never saw the job description —
+      could not trace these claims to your career facts.
+      <span style="color:var(--ink-2)">Nothing is released until you decide on each one.</span>
+    </p>
+  </div>
   <form method="post" action="/runs/{{ run.id }}/review">
     {% for flag in run.verify.flags %}
-      <div class="flag flag-{{ flag.severity }}">
-        <label>
-          {% if flag.severity == "blocker" %}
-            <input type="checkbox" name="accept" value="{{ flag.claim }}">
-          {% else %}
-            <input type="checkbox" checked disabled>
-          {% endif %}
-          <span>
-            <span class="flag-claim">{{ flag.claim }}</span>
-            <span class="chip {{ 'g-none' if flag.severity == 'blocker' else 'g-adjacent' }}"
-                  style="margin-left:var(--sp-2)">{{ flag.issue.replace("_", " ") }}</span>
-            <div class="small muted" style="margin-top:var(--sp-1)">{{ flag.explanation }}</div>
-            <div class="tiny muted" style="margin-top:3px">
-              {% if flag.severity == "blocker" %}
-                Tick only if this is genuinely true and defensible in an interview.
-              {% else %}Warning only — does not block release.{% endif %}
-            </div>
-          </span>
-        </label>
-      </div>
+      <label class="flag" style="cursor:{{ 'pointer' if flag.severity == 'blocker' else 'default' }}">
+        {% if flag.severity == "blocker" %}
+          <input type="checkbox" name="accept" value="{{ flag.claim }}" style="margin-top:2px; flex:none">
+        {% else %}
+          <span class="chip g-adjacent" style="flex:none">warning</span>
+        {% endif %}
+        <span class="flag-body">
+          <span class="flag-claim">{{ flag.claim }}</span>
+          <span class="chip {{ 'g-none' if flag.severity == 'blocker' else 'g-adjacent' }}"
+                style="margin-left:7px">{{ flag.issue.replace("_"," ") }}</span>
+          <div class="flag-why">{{ flag.explanation }}</div>
+          <div class="flag-hint">
+            {% if flag.severity == "blocker" %}
+              tick only if genuinely true and defensible in an interview
+            {% else %}
+              does not block release
+            {% endif %}
+          </div>
+        </span>
+      </label>
     {% endfor %}
-    <div class="row" style="margin-top:var(--sp-4)">
-      <button type="submit">Confirm and generate resume</button>
-      <span class="small muted">Anything left unticked keeps the resume blocked.</span>
+    <div class="card-pad" style="border-top:1px solid var(--line)">
+      <div class="row">
+        <button type="submit">Confirm and generate resume</button>
+        <span class="eyebrow">block_on_unresolved_flags — a structural gate, not a policy</span>
+      </div>
     </div>
   </form>
 </div>
 {% endif %}
 
-{# ── output ──────────────────────────────────────────────────────────────── #}
+{# ── Resume ──────────────────────────────────────────────────────────── #}
 {% if run.status == "done" and run.artifacts.get("resume_html") %}
-<h2>Tailored resume</h2>
-<div class="card">
-  <div class="row" style="margin-bottom:var(--sp-4)">
-    <a class="btn" href="/runs/{{ run.id }}/resume" target="_blank">Open full page</a>
-    <a class="btn secondary" href="/runs/{{ run.id }}/download">Download</a>
+<div class="section-head">
+  <h2>Tailored resume</h2>
+  <span class="note">
+    {{ run.resume.all_bullets() | length }} bullets ·
+    {{ run.resume.all_bullets() | rejectattr("fact_ids") | list | length }} untraceable
+  </span>
+</div>
+<div class="card card-pad">
+  <div class="row" style="margin-bottom:var(--sp-3)">
+    <a href="/runs/{{ run.id }}/resume" target="_blank" class="btn secondary">Open full page</a>
+    <a href="/runs/{{ run.id }}/download" class="btn secondary">Download</a>
   </div>
-  <iframe class="preview" src="/runs/{{ run.id }}/resume" title="Tailored resume"></iframe>
+  <iframe src="/runs/{{ run.id }}/resume" title="Tailored resume"
+          style="width:100%; height:620px; border:1px solid var(--line);
+                 border-radius:var(--r-3); background:#fff"></iframe>
 </div>
 
 {% if run.resume %}
-<h2>Provenance</h2>
-<div class="card card-flush">
-  <div class="card-head">
-    <span class="small muted">Every bullet, and the career facts it derives from.</span>
-  </div>
+<div class="section-head">
+  <h2>Provenance</h2>
+  <span class="note">nothing appears that isn't traceable to an atom</span>
+</div>
+<div class="card">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Bullet</th><th>Traces to</th></tr></thead>
+      <thead><tr><th>Bullet</th><th style="width:140px">Traces to</th></tr></thead>
       <tbody>
-      {% for bullet in run.resume.all_bullets() %}
+      {% for b in run.resume.all_bullets() %}
       <tr>
-        <td class="small">{{ bullet.text }}</td>
-        <td class="small muted" style="min-width:96px">
-          {% for fid in bullet.fact_ids %}<code>{{ fid }}</code>
-          {% else %}<span class="chip g-none">no source</span>{% endfor %}
+        <td>{{ b.text }}</td>
+        <td>
+          {% for fid in b.fact_ids %}<code>{{ fid }}</code> {% else %}
+            <span class="chip g-none">no source</span>{% endfor %}
         </td>
       </tr>
       {% endfor %}
@@ -210,8 +261,10 @@
 {% endif %}
 
 {% if lint %}
-<h2>ATS check</h2>
-<div class="card"><ul class="clean small">{% for i in lint %}<li>{{ i }}</li>{% endfor %}</ul></div>
+<div class="section-head"><h2>ATS check</h2><span class="note">deterministic — no model involved</span></div>
+<div class="card card-pad">
+  <ul class="clean small muted">{% for i in lint %}<li>{{ i }}</li>{% endfor %}</ul>
+</div>
 {% endif %}
 {% endif %}
 

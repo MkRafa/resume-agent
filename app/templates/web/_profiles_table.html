@@ -1,0 +1,20 @@
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Candidate</th><th>Profile key</th><th>Experience</th><th>Facts</th><th>Runs</th></tr>
+      </thead>
+      <tbody>
+      {% for p in profiles %}
+      <tr>
+        <td class="strong"><a href="/profiles/{{ p.key }}">{{ p.full_name or "(unnamed)" }}</a></td>
+        <td><code>{{ p.key }}</code></td>
+        <td class="mono tiny">{{ p.years }} yrs</td>
+        <td class="mono tiny muted">{{ p.atom_count if p.atom_count is defined else "—" }}</td>
+        <td class="mono tiny muted">{{ p.run_count }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

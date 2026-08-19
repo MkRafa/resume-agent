@@ -1,0 +1,25 @@
+{% set VC = {'strong_match':'g-direct','partial_match':'g-adjacent','not_matching':'g-none'} %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Role</th><th>Verdict</th><th>Status</th><th>When</th></tr></thead>
+      <tbody>
+      {% for r in runs %}
+      <tr>
+        <td class="strong">
+          <a href="/runs/{{ r.id }}">{{ r.jd_title or "Untitled run" }}</a>
+          {% if r.jd_company %}<div class="tiny muted">{{ r.jd_company }}</div>{% endif %}
+        </td>
+        <td>
+          {% if r.verdict %}
+            <span class="chip {{ VC[r.verdict] }}">{{ r.verdict.replace("_"," ") }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="mono tiny muted">{{ r.status.replace("_"," ") }}</td>
+        <td class="mono tiny muted">{{ r.created_at[:16].replace("T"," ") }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

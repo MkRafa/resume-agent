@@ -9,6 +9,7 @@ offline.
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -22,6 +23,7 @@ from app.config import settings
 from app.nodes.rendering import ats_lint
 from app.preflight import missing_credentials
 from app.runner import resolve_and_render, submit
+from app.schemas.match import UNSCORABLE_CATEGORIES
 from app.tools.documents import IMAGE_SUFFIXES, TEXT_SUFFIXES
 
 TEMPLATES = Jinja2Templates(directory=str(settings.root / "app" / "templates"))
@@ -37,9 +39,39 @@ def _startup() -> None:
     UPLOADS.mkdir(parents=True, exist_ok=True)
 
 
-def render(request: Request, name: str, context: dict, status_code: int = 200) -> HTMLResponse:
+def _nav() -> dict:
+    """Sidebar context, on every page.
+
+    The counts are real rather than decorative — the design shows numbers next
+    to each section, and showing invented ones would make the chrome lie about
+    the system it is reporting on.
+    """
+    runs = store.list_runs(limit=200)
+    eval_score = None
+    results = settings.root / "evals" / ".cache" / "results.jsonl"
+    if results.exists():
+        rows = [json.loads(l) for l in results.read_text().splitlines() if l.strip()]
+        graded = [r for r in rows if "error" not in r]
+        if graded:
+            agree = sum(1 for r in graded if r.get("drift") == 0)
+            eval_score = f"{round(100 * agree / len(graded))}%"
+
+    return {
+        "runs": len(runs),
+        "profiles": len(store.list_profiles()),
+        "inflight": [r for r in runs if r["status"] in ("queued", "running", "needs_review")][:4],
+        "eval_score": eval_score,
+        "match_model": settings.model_match.split("/", 1)[-1],
+        "provider": settings.model_match.split("/", 1)[0],
+    }
+
+
+def render(
+    request: Request, name: str, context: dict, status_code: int = 200, page: str = ""
+) -> HTMLResponse:
     """Current Starlette wants (request, name, context) — the older
     (name, context-with-request) form fails with an unhashable-dict TypeError."""
+    context = {**context, "nav": _nav(), "page": page}
     return TEMPLATES.TemplateResponse(request, name, context, status_code=status_code)
 
 
@@ -69,6 +101,7 @@ def index(request: Request):
             "profiles": store.list_profiles(),
             "credential_problems": missing_credentials(),
         },
+        page="new",
     )
 
 
@@ -125,20 +158,60 @@ async def start_run(
 
 
 def _run_context(run: dict) -> dict:
+    """Group the scorecard the way the design reads it: gates first (a single
+    failure ends the run), then scorable must-haves, then nice-to-haves that
+    never move the verdict. The excluded rows are shown but visibly set apart,
+    so it is obvious *why* they left the denominator."""
     scorecard, job = run["scorecard"], run["job"]
-    rows = []
+    groups: list[dict] = []
+    breakdown = {"direct": 0, "adjacent": 0, "absent": 0, "excluded": 0}
+
     if scorecard and job:
-        order = {"gate": 0, "must": 1, "implicit": 2, "nice": 3}
-        rows = sorted(
-            (
-                {"row": r, "req": job.by_id(r.requirement_id)}
-                for r in scorecard.rows
-                if job.by_id(r.requirement_id)
-            ),
-            key=lambda item: (order.get(item["req"].kind, 9), item["row"].requirement_id),
-        )
+        buckets: dict[str, list] = {"gate": [], "must": [], "nice": []}
+        for row in scorecard.rows:
+            req = job.by_id(row.requirement_id)
+            if req is None:
+                continue
+            excluded = req.boilerplate or req.category in UNSCORABLE_CATEGORIES
+            item = {"row": row, "req": req, "excluded": excluded}
+            buckets.setdefault("nice" if req.kind == "nice" else req.kind, []).append(item)
+
+            if req.kind == "nice":
+                continue
+            if excluded:
+                breakdown["excluded"] += 1
+            elif row.grade == "direct":
+                breakdown["direct"] += 1
+            elif row.grade in ("adjacent", "transferable"):
+                breakdown["adjacent"] += 1
+            else:
+                breakdown["absent"] += 1
+
+        labels = {
+            "gate": ("Gates", "a single failure ends the run"),
+            "must": ("Must-haves", "weighted into coverage"),
+            "nice": ("Nice-to-haves", "never affect the verdict"),
+        }
+        for kind in ("gate", "must", "nice"):
+            # NB: the key must not be called "items" — Jinja resolves g.items to
+            # dict.items (the bound method) before it ever looks for the key.
+            entries = sorted(buckets.get(kind, []), key=lambda i: i["row"].requirement_id)
+            if entries:
+                title, note = labels[kind]
+                groups.append({"title": title, "note": note, "rows": entries, "kind": kind})
+
     lint = ats_lint(run["resume"], job) if run["resume"] and run["status"] == "done" else []
-    return {"run": run, "rows": rows, "lint": lint}
+    report = run.get("verify")
+    resolved = set(run.get("resolved") or [])
+    blockers = report.blockers if report else []
+    return {
+        "run": run,
+        "groups": groups,
+        "breakdown": breakdown,
+        "lint": lint,
+        "blockers_total": len(blockers),
+        "blockers_resolved": sum(1 for f in blockers if f.claim in resolved),
+    }
 
 
 @app.get("/runs/{run_id}", response_class=HTMLResponse)
@@ -146,7 +219,7 @@ def run_page(request: Request, run_id: str):
     run = store.get_run(run_id)
     if not run:
         return HTMLResponse("Run not found", status_code=404)
-    return render(request, "web/run.html", _run_context(run))
+    return render(request, "web/run.html", _run_context(run), page="runs")
 
 
 @app.get("/runs/{run_id}/body", response_class=HTMLResponse)
@@ -228,4 +301,59 @@ def profile_page(request: Request, key: str):
             "by_company": by_company,
             "runs": store.list_runs(profile_key=key),
         },
+        page="profiles",
+    )
+
+
+@app.get("/runs", response_class=HTMLResponse)
+def runs_index(request: Request):
+    return render(request, "web/runs.html", {"runs": store.list_runs(limit=100)}, page="runs")
+
+
+@app.get("/profiles", response_class=HTMLResponse)
+def profiles_index(request: Request):
+    return render(
+        request, "web/profiles.html", {"profiles": store.list_profiles()}, page="profiles"
+    )
+
+
+@app.get("/system", response_class=HTMLResponse)
+def system_page(request: Request):
+    """Model routing and the eval baseline — both read from the live config and
+    the recorded gold results rather than being written into the template."""
+    nodes = [
+        ("extract", "profile -> career graph", settings.model_extract),
+        ("parse", "JD -> requirements", settings.model_parse),
+        ("match", "grade evidence per requirement", settings.model_match),
+        ("tailor", "select facts, write the resume", settings.model_tailor),
+        ("verify", "adversarial fact-check", settings.model_verify),
+    ]
+    results = settings.root / "evals" / ".cache" / "results.jsonl"
+    gold: list[dict] = []
+    if results.exists():
+        seen: dict[str, dict] = {}
+        for line in results.read_text().splitlines():
+            if line.strip():
+                row = json.loads(line)
+                seen[row["id"]] = row
+        gold = list(seen.values())
+    graded = [r for r in gold if "error" not in r]
+    summary = {
+        "total": len(graded),
+        "agree": sum(1 for r in graded if r.get("drift") == 0),
+        "generous": sum(1 for r in graded if (r.get("drift") or 0) > 0),
+        "strict": sum(1 for r in graded if (r.get("drift") or 0) < 0),
+    }
+    return render(
+        request,
+        "web/system.html",
+        {
+            "nodes": nodes,
+            "fallbacks": [m for m in settings.fallbacks.split(",") if m.strip()],
+            "redact": settings.redact_pii,
+            "gold": sorted(graded, key=lambda r: r["id"]),
+            "summary": summary,
+            "credential_problems": missing_credentials(),
+        },
+        page="system",
     )
