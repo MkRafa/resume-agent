@@ -97,3 +97,21 @@ def test_eval_score_counts_each_case_once(client, tmp_path, monkeypatch):
 
     assert web._nav()["eval_score"] == "100%"
     assert "2/2" in client.get("/system").text
+
+
+def test_failed_run_still_shows_the_completed_match(client):
+    from app.schemas import JobSpec, Requirement, Scorecard, ScorecardRow
+
+    job = JobSpec(title="Senior Backend Engineer", requirements=[
+        Requirement(id="r_01", kind="must", category="skill", text="Kafka")])
+    scorecard = Scorecard(rows=[ScorecardRow(requirement_id="r_01", grade="direct",
+                                             evidence_fact_ids=["f_001"], rationale="Kafka queue")],
+                          verdict="strong_match", must_coverage=1.0)
+    run_id = store.create_run()
+    store.update_run(run_id, status="failed", stage="Model unavailable",
+                     error="Verifier down. The match below completed before the failure and is still valid.",
+                     job_json=job, scorecard_json=scorecard, verdict="strong_match")
+
+    page = client.get(f"/runs/{run_id}").text
+    assert "Model unavailable" in page and "still valid" in page
+    assert "Evidence scorecard" in page and "Strong Match" in page

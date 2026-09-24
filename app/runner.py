@@ -20,15 +20,15 @@ from pathlib import Path
 from app import store
 from app.config import settings
 from app.graph import PIPELINE
-from app.models import ModelCallError, QuotaExhausted
+from app.models import ModelCallError
 from app.nodes import render as render_node
 from app.state import new_state
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pipeline")
 _LOCK = threading.Lock()
 
-# Node -> what the user sees. Streaming the graph means the UI shows the stage
-# the run is actually in, rather than one static label for 60 seconds.
+# Node -> what the user sees while that node runs. Ordered as the pipeline
+# runs, which is also the order parallel steps are listed in.
 STAGE_LABELS: dict[str, str] = {
     "intake_profile": "Reading the profile",
     "intake_jd": "Reading the job description",
@@ -135,8 +135,39 @@ def _execute(run_id: str, **kwargs) -> None:
         discard_uploads(kwargs["profile_file"], kwargs["jd_file"])
 
 
+def _stage_label(running: set[str]) -> str | None:
+    """What the run is doing now: every node currently executing, in pipeline
+    order - the profile and JD branches run in parallel, so both are named."""
+    return " · ".join(label for node, label in STAGE_LABELS.items() if node in running) or None
+
+
+def _results(final: dict) -> dict:
+    """The run's durable results from whatever state the graph reached.
+
+    Deliberately excludes the resume: on a failed run it has not been verified,
+    and an unverified resume must never be stored where it could be shown.
+    """
+    graph, job, scorecard = final.get("graph"), final.get("job"), final.get("scorecard")
+    profile_key = (
+        store.save_profile(graph, final.get("years_experience", 0.0)) if graph is not None else None
+    )
+    return {
+        "profile_key": profile_key,
+        "jd_title": job.title if job else None,
+        "jd_company": job.company if job else None,
+        "verdict": scorecard.verdict if scorecard else None,
+        # Snapshot, not a reference to the profile: the profile is replaced by
+        # the next extraction, and atom ids (f_001...) are reassigned each time.
+        "graph_json": graph,
+        "job_json": job,
+        "scorecard_json": scorecard,
+    }
+
+
 def _run_pipeline(run_id: str, **kwargs) -> None:
     store.update_run(run_id, status="running", stage="Reading documents")
+    final: dict = {}
+    running: set[str] = set()
     try:
         state = new_state(
             profile_text=kwargs["profile_text"],
@@ -147,30 +178,37 @@ def _run_pipeline(run_id: str, **kwargs) -> None:
             phone_hint=kwargs["phone"],
             out_dir=_out_dir(run_id),
         )
-        # Stream rather than invoke: "updates" names the node that just ran (so
-        # the UI can show real progress), "values" carries the accumulated
-        # state, whose last emission is the final result.
-        final: dict = {}
-        for mode, chunk in PIPELINE.stream(state, stream_mode=["updates", "values"]):
-            if mode == "updates":
-                for node in chunk:
-                    if label := STAGE_LABELS.get(node):
-                        store.update_run(run_id, stage=label)
-            elif mode == "values":
+        # "tasks" reports each node as it STARTS and as it finishes, so the
+        # label names the step in progress. ("updates" only fires on finish,
+        # which labelled every step with the one before it - the page said
+        # "Building the career graph" for the six minutes spent parsing the JD.)
+        # "values" carries the accumulated state; its last emission is final.
+        for mode, chunk in PIPELINE.stream(state, stream_mode=["tasks", "values"]):
+            if mode == "tasks":
+                if "input" in chunk:
+                    running.add(chunk["name"])
+                else:
+                    running.discard(chunk["name"])
+                if label := _stage_label(running):
+                    store.update_run(run_id, stage=label)
+            else:
                 final = chunk
-    except (QuotaExhausted, ModelCallError) as exc:
-        stage, headline, detail = _classify(exc)
+    except Exception as exc:  # noqa: BLE001 - a failed run must still report
+        failed_during = _stage_label(running)
+        if isinstance(exc, ModelCallError):  # includes QuotaExhausted
+            stage, headline, detail = _classify(exc)
+        else:
+            stage, headline = "Crashed", f"{type(exc).__name__}: {exc}"
+            detail = traceback.format_exc()[-2000:]
+        if failed_during:
+            headline = f"{headline} (failed while: {failed_during.lower()})"
+        # Keep what finished before the failure. A verifier outage used to
+        # discard a verdict and gap report that had already been computed.
+        results = _results(final)
+        if results["scorecard_json"] is not None:
+            headline += " The match below completed before the failure and is still valid."
         store.update_run(
-            run_id, status="failed", stage=stage, error=headline, notes_json=[detail]
-        )
-        return
-    except Exception as exc:  # noqa: BLE001 - a crashed run must still report
-        store.update_run(
-            run_id,
-            status="failed",
-            stage="Crashed",
-            error=f"{type(exc).__name__}: {exc}",
-            notes_json=[traceback.format_exc()[-2000:]],
+            run_id, status="failed", stage=stage, error=headline, notes_json=[detail], **results
         )
         return
 
@@ -180,24 +218,8 @@ def _run_pipeline(run_id: str, **kwargs) -> None:
         )
         return
 
-    graph = final.get("graph")
-    job = final.get("job")
-    scorecard = final.get("scorecard")
-    profile_key = None
-
-    if graph is not None:
-        profile_key = store.save_profile(graph, final.get("years_experience", 0.0))
-
     common = {
-        "profile_key": profile_key,
-        "jd_title": job.title if job else None,
-        "jd_company": job.company if job else None,
-        "verdict": scorecard.verdict if scorecard else None,
-        # Snapshot, not a reference to the profile: the profile is replaced by
-        # the next extraction, and atom ids (f_001...) are reassigned each time.
-        "graph_json": graph,
-        "job_json": job,
-        "scorecard_json": scorecard,
+        **_results(final),
         "resume_json": final.get("resume"),
         "verify_json": final.get("verify_report"),
         "artifacts_json": final.get("artifacts", {}),
