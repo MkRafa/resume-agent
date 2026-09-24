@@ -1,0 +1,23 @@
+name: tests
+
+# Unit and plumbing tests: models are stubbed, so no API keys and no quota.
+# The gold-set tests make real model calls and skip unless RUN_GOLD is set.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest evals/ -q
