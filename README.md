@@ -346,7 +346,7 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 | 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker, model routing, PII redaction, eval cache keys | free | `test_identity/dates/keywords/verdict/quota/config/pii/gold_cache.py` |
 | 2. Plumbing | Fan-out, join, routing, render guardrail, provenance, intake errors, the store, the web review gate — models stubbed | free | `test_pipeline/documents/store/web/models.py` |
 | 3. **Verdict agreement** | Does the grader match human labels? **The eval that matters** | ~43 calls cold | `run_gold.py`, `test_gold.py` |
-| 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 22 calls | `run_verifier.py` |
+| 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 23 calls | `run_verifier.py` |
 | 5. **Hallucination rate** | Can every claim on a generated resume be traced? | free | `app/tools/claim_trace.py` |
 
 ```bash
@@ -360,7 +360,7 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 ./.venv/bin/python evals/run_verifier.py --offline
 ```
 
-22 hand-built `(facts, bullet)` pairs — 11 that must be flagged, 11 that must
+23 hand-built `(facts, bullet)` pairs — 12 that must be flagged, 11 that must
 not. The two failure modes are reported separately rather than rolled into one
 accuracy figure, because they cost very different things:
 
@@ -368,22 +368,24 @@ accuracy figure, because they cost very different things:
 - a **false positive** blocks a truthful resume, and teaches the reviewer to
   tick every box without reading — silently turning the gate into a rubber stamp
 
-**Current baseline (`gpt-oss-120b` on Groq, 2026-09-24, all 22 live):**
+**Current baseline (`gpt-oss-120b` on Groq, 2026-09-24, all 23 live):**
 
 ```
-Misses            0 / 11     fabrication that would ship on a real resume
-False positives   1 / 11     truthful resumes blocked
-Exactly correct  17 / 22     right call AND right severity
+Misses            0 / 12     fabrication that would ship on a real resume
+False positives   0 / 11     truthful resumes blocked
+Exactly correct  19 / 23     right call AND right severity
 ```
 
 The verifier moved to `gpt-oss-120b` because Groq retired
-`llama-3.3-70b-versatile` — every run failed at the verify step. Still zero
-misses. The one false positive, `clean_merged_atoms`, is arguably a **labelling
-error, not a model error**: the fixture bullet says "authoring *its*
-runbooks" (the route-optimisation API's), while the source atom says the
-runbooks were for the shipment and billing services. The model flagged exactly
-that misattribution. Llama let it through. The fixture needs a decision —
-rewrite the bullet into a faithful merge, or relabel it `flag`.
+`llama-3.3-70b-versatile` — every run failed at the verify step.
+
+Its first run scored one false positive, on `clean_merged_atoms` — and the
+model was right. The fixture's bullet said "authoring *its* runbooks" (the
+route-optimisation API's) while the source atom says the runbooks were for the
+shipment and billing services: a merge that quietly transfers a fact between
+atoms. Llama had let it through. The clean case now carries a faithful merge,
+and the original bullet became a should-flag case, `flag_misattributed_merge` —
+the subtlest fabrication in the set.
 
 **Previous baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
 
@@ -637,10 +639,9 @@ proof.
 - **Grader calibration: 82% agreement, 0 over-generous** (22 cases,
   `gemini-3.5-flash`, 2026-08-15). Good enough to build on; not yet good enough
   to trust unsupervised. See the confusion matrix above.
-- **Verifier: 0/11 misses, 1/11 false positives** on 22 hand-built pairs
-  (`gpt-oss-120b`; the one FP is arguably a mislabelled fixture), with two
-  false-positive classes enforced in Python rather than the prompt. A small
-  set — see [Verifier eval](#verifier-eval).
+- **Verifier: 0/12 misses, 0/11 false positives** on 23 hand-built pairs
+  (`gpt-oss-120b`), with two false-positive classes enforced in Python rather
+  than the prompt. A small set — see [Verifier eval](#verifier-eval).
 - **Images and scanned PDFs are not read.** Images are refused; a scan is
   detected and the user asked to paste text. A multimodal rung would send
   unredacted pixels to the provider, so it is a decision, not a default.
