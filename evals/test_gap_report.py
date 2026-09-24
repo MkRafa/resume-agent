@@ -40,3 +40,33 @@ def test_unknown_on_a_scorable_must_is_reported(monkeypatch):
     assert "[r_01]" in weak_section           # scorable unknown: explained
     assert "[r_02]" not in weak_section       # work authorization: an open question
     assert "[r_03]" not in weak_section
+
+
+def test_boilerplate_is_never_reported_as_a_gap(monkeypatch):
+    """Regression from a live run: "strong communication skills" and "attention
+    to detail" - flagged boilerplate, excluded from the verdict - still came
+    back as 'coachable' gaps."""
+    seen: dict[str, str] = {}
+
+    def fake(schema, **kwargs):
+        seen["context"] = kwargs["variable_context"]
+        return schema()
+
+    monkeypatch.setattr(matching, "complete_json", fake)
+    job = JobSpec(requirements=[
+        Requirement(id="r_01", kind="must", category="skill", text="Strong Go"),
+        Requirement(id="r_02", kind="must", category="soft", text="Strong communication skills",
+                    boilerplate=True),
+    ])
+    scorecard = Scorecard(rows=[
+        ScorecardRow(requirement_id="r_01", grade="none", rationale="Go (basic) only"),
+        ScorecardRow(requirement_id="r_02", grade="transferable", evidence_fact_ids=["f_001"],
+                     rationale="mentoring"),
+    ], verdict="partial_match")
+    graph = CareerGraph(identity=Identity(primary_key="a@b.co", keys=["a@b.co"]),
+                        atoms=[FactAtom(id="f_001", type="achievement", raw_text="Mentored 3.")])
+
+    matching.gap_report({"graph": graph, "job": job, "scorecard": scorecard})
+
+    weak_section = seen["context"].split("WEAK OR MISSING REQUIREMENTS:")[1]
+    assert "[r_01]" in weak_section and "[r_02]" not in weak_section
