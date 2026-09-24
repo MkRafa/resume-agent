@@ -76,7 +76,8 @@ def tailor(state: PipelineState) -> dict:
         node="tailor",
         system=load("tailor"),
         variable_context=(
-            f"CANDIDATE: {graph.full_name or '(name withheld)'}\n"
+            # The name is not sent: the writer does not need it, redaction
+            # cannot pattern-match it, and it is set from the graph below.
             f"LOCATION: {graph.location or '?'}\n"
             f"LINKS: {', '.join(graph.links) or '(none)'}\n"
             # The JD block below states the employer's *minimum* years. Without
@@ -97,8 +98,7 @@ def tailor(state: PipelineState) -> dict:
         temperature=0.4,
     )
 
-    if graph.full_name and not resume.full_name:
-        resume.full_name = graph.full_name
+    resume.full_name = graph.full_name or resume.full_name
     contact = dict(resume.contact)
     if graph.identity.email:
         contact.setdefault("email", graph.identity.email)

@@ -18,16 +18,16 @@ def _bool(name: str, default: bool) -> bool:
 class Settings:
     # Per-node model routing. Any LiteLLM-supported id.
     model_extract: str = field(
-        default_factory=lambda: os.getenv("MODEL_EXTRACT", "gemini/gemini-2.0-flash")
+        default_factory=lambda: os.getenv("MODEL_EXTRACT", "gemini/gemini-3.5-flash")
     )
     model_parse: str = field(
-        default_factory=lambda: os.getenv("MODEL_PARSE", "gemini/gemini-2.0-flash")
+        default_factory=lambda: os.getenv("MODEL_PARSE", "gemini/gemini-3.5-flash")
     )
     model_match: str = field(
-        default_factory=lambda: os.getenv("MODEL_MATCH", "gemini/gemini-2.0-flash")
+        default_factory=lambda: os.getenv("MODEL_MATCH", "gemini/gemini-3.5-flash")
     )
     model_tailor: str = field(
-        default_factory=lambda: os.getenv("MODEL_TAILOR", "gemini/gemini-2.0-flash")
+        default_factory=lambda: os.getenv("MODEL_TAILOR", "gemini/gemini-3.5-flash")
     )
     # Deliberately a different family from model_tailor: a model asked to check
     # its own output shares its own blind spots.

@@ -1,8 +1,8 @@
 """FastAPI app.
 
 One Python service: the pipeline, the store and the UI. Server-rendered Jinja
-with a small amount of vanilla JS for polling - no build step, no CDN, works
-offline.
+with a small amount of vanilla JS for polling - no build step, no JS
+dependencies. Fonts come from Google Fonts, falling back to system fonts.
 
     ./.venv/bin/uvicorn app.web:app --reload --port 8000
 """

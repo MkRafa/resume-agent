@@ -1,8 +1,8 @@
 """PII redaction around model calls.
 
 The model does not need a real name, email, phone or street address to grade
-evidence or write a bullet. Swapping them for placeholders before the request
-and restoring afterwards cuts exposure substantially - which matters a great
+evidence or write a bullet. Swapping contact details for placeholders before
+the request and restoring afterwards cuts exposure substantially - which matters a great
 deal on free tiers, where inputs are generally used to improve the provider's
 models.
 
@@ -19,14 +19,26 @@ PHONE_RE = re.compile(r"(?<![\w])(?:\+\d{1,3}[\s-]?)?(?:\(?\d{3,5}\)?[\s.-]?){2,
 URL_RE = re.compile(r"https?://\S+|(?:www\.|linkedin\.com/|github\.com/)\S+", re.IGNORECASE)
 
 
+# A run of years ("2018 2019 2020 2021") satisfies PHONE_RE's digit-group
+# shape. Redacting it would hide dates the model needs and restore nothing.
+_ONLY_YEARS = re.compile(r"(?:(?:19|20)\d{2}[\s.\-–]*)+")
+
+
 def redact(text: str) -> tuple[str, dict[str, str]]:
-    """Replace PII with stable placeholders. Returns (redacted, mapping)."""
+    """Replace PII with stable placeholders. Returns (redacted, mapping).
+
+    Emails, phone numbers and URLs only. Names are not pattern-matchable, so
+    they are kept out of prompts at the source instead: after extraction the
+    name lives on the graph and no later prompt includes it.
+    """
     mapping: dict[str, str] = {}
     counters = {"EMAIL": 0, "PHONE": 0, "URL": 0}
 
     def swap(kind: str):
         def _sub(match: re.Match[str]) -> str:
             original = match.group(0)
+            if kind == "PHONE" and _ONLY_YEARS.fullmatch(original.strip()):
+                return original
             for placeholder, value in mapping.items():
                 if value == original:
                     return placeholder

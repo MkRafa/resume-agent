@@ -10,7 +10,7 @@ built. Grader calibration against the gold set is the open work — see
 
 - [Architecture](#architecture) — the full end-to-end map
 - [Web app](#web-app) · [Setup](#setup) · [Evaluation](#evaluation)
-- [Gotchas already paid for](#gotchas-already-paid-for) — nine bugs, and why they happened
+- [Gotchas already paid for](#gotchas-already-paid-for) — the bugs, and why they happened
 
 ## Web app
 
@@ -19,7 +19,8 @@ cd resume-agent && ./.venv/bin/uvicorn app.web:app --reload --port 8000
 ```
 
 One Python service — pipeline, store and UI. Server-rendered Jinja with vanilla
-JS polling: no build step, no CDN, works offline.
+JS polling: no build step, no JS dependencies. The only external request is
+Google Fonts; offline, the UI falls back to system fonts.
 
 - **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD)
 - **`/runs/{id}`** — live progress, then the evidence scorecard, verdict, open
@@ -136,7 +137,7 @@ ways that look entirely plausible.
 | Orchestration | **LangGraph** | Typed state, explicit conditional edges, and — the reason it earns its place — checkpointing for the human review interrupt |
 | Contracts | **Pydantic v2** | Schema at every node boundary; validation failures drive the model retry |
 | Model routing | **LiteLLM** | One call path across Gemini / Groq / Ollama; swap providers by config, not code |
-| Web | **FastAPI + Jinja** | One Python service. Vanilla JS polling — no build step, no CDN, works offline |
+| Web | **FastAPI + Jinja** | One Python service. Vanilla JS polling — no build step, no JS dependencies |
 | Store | **SQLite (WAL)** | Postgres-shaped schema; the worker thread and request thread both write |
 | Eval | **pytest + JSONL** | Free, no vendor. `run_gold.py` adds a confusion matrix |
 
@@ -206,11 +207,11 @@ the call path in `models.py` stays readable end to end.
 
 | Hook | When | What it does |
 |---|---|---|
-| `pii.redact` / `restore` | before / after every call | Swaps names, emails, phones, URLs for placeholders. The model doesn't need real PII to grade evidence. Mitigation, **not** a compliance story — employment history is itself identifying |
+| `pii.redact` / `restore` | before / after every call | Swaps emails, phones and URLs for placeholders — including on the schema-retry path. Names can't be pattern-matched, so they are kept out of every prompt after extraction instead. Mitigation, **not** a compliance story — employment history is itself identifying |
 | `models.validate_or_retry` | after every call | Pydantic parse; on failure, feeds the validation error back and retries once |
 | `cost.log_cost` | after every call | Per-node token ledger. You want this before the first bill, not after |
 | `guardrail.block_on_unresolved_flags` | before `render` | **Hard gate.** Raises `RenderBlocked` while any verifier blocker is unresolved. Structural, not a policy someone remembers |
-| `audit.write_audit_log` | after `render` | Persists every bullet → `fact_id` edge to `provenance.json`, flagging orphans |
+| `audit.write_audit_log` | after `render` | Persists every cited claim → `fact_id` edge (summary, experience, projects) to `provenance.json`, flagging orphans |
 
 ### Agents
 
@@ -236,10 +237,10 @@ stops on its own. It needs a hard turn cap or it will interview people forever.
 which is where the hooks hang.
 
 ```
-extract   gemini-3.7-flash    native PDF/image, cheap, structured output
-parse     gemini-3.7-flash    low judgement
-match     gemini-3.7-flash    highest-judgement node — first to upgrade on a paid key
-tailor    gemini-3.7-flash    user-visible quality
+extract   gemini-3.5-flash    cheap, structured output
+parse     gemini-3.5-flash    low judgement
+match     gemini-3.5-flash    highest-judgement node — first to upgrade on a paid key
+tailor    gemini-3.5-flash    user-visible quality
 verify    groq/llama-3.3-70b  DIFFERENT FAMILY, deliberately
 ```
 
@@ -329,7 +330,7 @@ app/
   runner.py        background execution + status
   web.py           FastAPI routes
 evals/
-  test_*.py        84 tests, no API calls
+  test_*.py        unit, plumbing, store and web tests — no API calls
   run_gold.py      gold-set runner + confusion matrix
   gold/            22 labelled pairs, 8 profiles × 13 JDs (synthetic)
 cli.py             the M0 entry point
@@ -342,14 +343,14 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 
 | Layer | What it checks | Cost | Where |
 |---|---|---|---|
-| 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker | free | `test_identity/dates/keywords/verdict/quota.py` |
-| 2. Plumbing | Fan-out, join, routing, render guardrail, provenance — models stubbed | free | `test_pipeline.py` |
+| 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker, model routing, PII redaction, eval cache keys | free | `test_identity/dates/keywords/verdict/quota/config/pii/gold_cache.py` |
+| 2. Plumbing | Fan-out, join, routing, render guardrail, provenance, intake errors, the store, the web review gate — models stubbed | free | `test_pipeline/documents/store/web/models.py` |
 | 3. **Verdict agreement** | Does the grader match human labels? **The eval that matters** | ~43 calls cold | `run_gold.py`, `test_gold.py` |
 | 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 22 calls | `run_verifier.py` |
 | 5. **Hallucination rate** | Can every claim on a generated resume be traced? | free | `app/tools/claim_trace.py` |
 
 ```bash
-./.venv/bin/python -m pytest evals/ -q        # 84 tests, no API calls
+./.venv/bin/python -m pytest evals/ -q        # no API calls; gold tests skip
 ```
 
 ### Verifier eval
@@ -556,14 +557,32 @@ Fixtures are synthetic — never commit a real person's resume.
 - **Node modules must not share a name with the function they export.**
   `match.py` exporting `match` gets shadowed in `app/nodes/__init__.py`, making
   it unpatchable in tests. Hence `matching.py` / `rendering.py`.
+- **Redaction must survive the retry path.** The schema retry appended the
+  model's output *after* placeholders were restored, so the second request
+  carried the real email and phone. Anything derived from restored text that
+  goes back to a provider must be re-redacted.
+- **Failover can quietly undo cross-family verification.** Guarding the
+  verifier against Gemini fallbacks is half of it: with the verifier's own
+  model in `MODEL_FALLBACKS`, a rate-limited Gemini handed the *writing* to
+  the model that then checked it. Independence has to be enforced in both
+  directions, by family, not by exact id.
+- **A cache key must include what produced the output.** Keying eval caches
+  on the fixture alone replays the previous prompt's output as the new
+  prompt's result — and caching *after* a deterministic filter hides every
+  later change to that filter.
+- **`.gitignore` cannot re-include a file inside an ignored directory.**
+  `data/` with `!data/profiles/sample_*` silently shipped no samples; it has to
+  be `data/*` and a negation per level.
 - **Don't route to `END` per-branch before a join.** The healthy branch still
   triggers the join node, which then reads a key the failed branch never wrote.
   The abort check belongs at the join.
 
 ## Privacy
 
-Resumes are dense PII. `REDACT_PII=true` swaps names, emails, phones and URLs
-for placeholders before every model call and restores them after — but
+Resumes are dense PII. `REDACT_PII=true` swaps emails, phones and URLs for
+placeholders before every model call and restores them after, retries
+included. Names cannot be pattern-matched, so the extractor necessarily sees
+the name in the source document; no prompt after that includes it. But
 employment history is itself identifying, and **free provider tiers generally
 train on inputs**. Fine for synthetic data and your own resume; not acceptable
 once real users upload theirs. Move to a no-training tier before M1 launches.
@@ -573,9 +592,9 @@ For fully local extraction, point `MODEL_EXTRACT` at an Ollama model.
 
 **Calibration — the baseline exists now (82%, 0 over-generous).** Next: grow
 the gold set toward ~30 pairs weighted to `partial_match` (3 of the 4 remaining
-errors involve it), then build the two missing eval layers — hallucination rate,
-and verifier should-flag/shouldn't-flag pairs. The verifier has been tuned twice
-by reading single outputs, which is the thing evals exist to stop.
+errors involve it). The verifier eval (22 pairs) and claim tracing now exist
+too — grow the verifier set alongside, since 22 cases at 0/0 is a floor, not
+proof.
 
 **Then, in rough order:**
 
@@ -600,8 +619,12 @@ by reading single outputs, which is the thing evals exist to stop.
 - **Grader calibration: 82% agreement, 0 over-generous** (22 cases,
   `gemini-3.5-flash`, 2026-08-15). Good enough to build on; not yet good enough
   to trust unsupervised. See the confusion matrix above.
-- **Verifier over-flags.** It catches real problems and still flags accurate
-  specific→general naming. No eval yet.
+- **Verifier: 0/11 misses, 0/11 false positives** on 22 hand-built pairs
+  (`llama-3.3-70b`), with two false-positive classes enforced in Python
+  rather than the prompt. A small set — see [Verifier eval](#verifier-eval).
+- **Images and scanned PDFs are not read.** Images are refused; a scan is
+  detected and the user asked to paste text. A multimodal rung would send
+  unredacted pixels to the provider, so it is a decision, not a default.
 - **Free tier is the binding constraint** — Gemini allows 20 requests/day/model
   and one match is ~7 calls, so ~3 runs/day. Pro models 429 immediately, which
   is why `match` runs on Flash despite being the highest-judgement node.
