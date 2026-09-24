@@ -193,7 +193,7 @@ generated.** All unit-tested.
 
 | Module | Functions | Notes |
 |---|---|---|
-| `identity.py` | `normalize_email`, `normalize_phone`, `resolve_identity`, `merge_identities`, `lookup_keys` | Email primary, phone fallback. **Both retained as alternate keys** so a later upload with only one reconciles instead of forking a second profile. Gmail dots deliberately *not* canonicalised — wrongly merging two people is worse than failing to merge one |
+| `identity.py` | `normalize_email`, `normalize_phone`, `resolve_identity`, `merge_identities` | Email primary, phone fallback. **Both retained as alternate keys** so a later upload with only one reconciles instead of forking a second profile. Gmail dots deliberately *not* canonicalised — wrongly merging two people is worse than failing to merge one |
 | `dates.py` | `parse_month`, `years_of_experience`, `graph_years_of_experience` | Overlapping roles are **merged, not summed** — two concurrent jobs are 5 years, not 10. LLMs get this wrong plausibly |
 | `documents.py` | `from_text`, `from_file`, `load_input` | PDF/DOCX/TXT/MD → one `Document`. Images are refused with a reason (no extraction path, and redaction cannot touch pixels). Detects a scanned PDF (empty text layer) instead of silently extracting 40 characters. Reads DOCX **tables** — resumes hide whole roles there |
 | `keywords.py` | `keyword_coverage`, `resume_to_text` | Word-bounded matching ("Go" must not hit "Django"). Stuffing needs high density **and** ≥4 repetitions **and** a document long enough for density to mean anything |

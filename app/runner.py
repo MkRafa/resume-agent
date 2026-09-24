@@ -42,16 +42,6 @@ STAGE_LABELS: dict[str, str] = {
     "render": "Rendering",
 }
 
-# Ordered for the progress stepper in the UI.
-STAGE_ORDER: list[str] = [
-    "Reading the profile",
-    "Building the career graph",
-    "Grading evidence",
-    "Writing the resume",
-    "Verifying every claim",
-    "Rendering",
-]
-
 
 def submit(
     run_id: str,
