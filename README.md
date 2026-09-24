@@ -21,7 +21,7 @@ cd resume-agent && ./.venv/bin/uvicorn app.web:app --reload --port 8000
 One Python service — pipeline, store and UI. Server-rendered Jinja with vanilla
 JS polling: no build step, no CDN, works offline.
 
-- **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD, image)
+- **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD)
 - **`/runs/{id}`** — live progress, then the evidence scorecard, verdict, open
   questions, gaps and adjacent roles
 - **the review gate** — when the verifier can't trace a claim, the resume is
@@ -195,7 +195,7 @@ generated.** All unit-tested.
 |---|---|---|
 | `identity.py` | `normalize_email`, `normalize_phone`, `resolve_identity`, `merge_identities`, `lookup_keys` | Email primary, phone fallback. **Both retained as alternate keys** so a later upload with only one reconciles instead of forking a second profile. Gmail dots deliberately *not* canonicalised — wrongly merging two people is worse than failing to merge one |
 | `dates.py` | `parse_month`, `years_of_experience`, `graph_years_of_experience` | Overlapping roles are **merged, not summed** — two concurrent jobs are 5 years, not 10. LLMs get this wrong plausibly |
-| `documents.py` | `from_text`, `from_file`, `load_input` | PDF/DOCX/TXT/MD/image → one `Document`. Detects a scanned PDF (empty text layer) instead of silently extracting 40 characters. Reads DOCX **tables** — resumes hide whole roles there |
+| `documents.py` | `from_text`, `from_file`, `load_input` | PDF/DOCX/TXT/MD → one `Document`. Images are refused with a reason (no extraction path, and redaction cannot touch pixels). Detects a scanned PDF (empty text layer) instead of silently extracting 40 characters. Reads DOCX **tables** — resumes hide whole roles there |
 | `keywords.py` | `keyword_coverage`, `resume_to_text` | Word-bounded matching ("Go" must not hit "Django"). Stuffing needs high density **and** ≥4 repetitions **and** a document long enough for density to mean anything |
 | `verdict.py` | `compute_verdict`, `strongest_hooks` | The rule: any failed gate → `not_matching`; >2 absent musts → `not_matching`; ≥80% coverage with none absent → `strong`; ≥50% → `partial`. Boilerplate and unscorable categories leave the denominator |
 
@@ -221,8 +221,9 @@ nodes "agents" would be marketing. Two components are agent-*shaped*:
 - **The verifier** — runs on a different model family, in a deliberately starved
   context (no JD), with an adversarial instruction. Isolation is a correctness
   mechanism, not an implementation detail.
-- **The document extractor** — a fallback ladder (text layer → multimodal →
-  ask the user to paste) rather than a single path.
+- **The document extractor** — a fallback ladder (text layer → ask the user
+  to paste) rather than a single path. A multimodal rung for images and scans
+  is designed but not built: it would send unredacted pixels to the provider.
 
 The one genuinely agentic component in the *design* is the **enrichment
 interviewer** (M2, not built): it decides which scorecard gaps are worth asking

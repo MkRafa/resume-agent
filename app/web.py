@@ -24,11 +24,11 @@ from app.nodes.rendering import ats_lint
 from app.preflight import missing_credentials
 from app.runner import resolve_and_render, submit
 from app.schemas.match import UNSCORABLE_CATEGORIES
-from app.tools.documents import IMAGE_SUFFIXES, TEXT_SUFFIXES
+from app.tools.documents import TEXT_SUFFIXES
 
 TEMPLATES = Jinja2Templates(directory=str(settings.root / "app" / "templates"))
 UPLOADS = settings.data_dir / "uploads"
-ALLOWED_SUFFIXES = {".pdf", ".docx", *TEXT_SUFFIXES, *IMAGE_SUFFIXES}
+ALLOWED_SUFFIXES = {".pdf", ".docx", *TEXT_SUFFIXES}
 
 app = FastAPI(title="resume-agent")
 
