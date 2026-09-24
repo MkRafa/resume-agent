@@ -116,10 +116,16 @@ def _is_weak(row: ScorecardRow, job) -> bool:
     sinks the verdict without being explained is the worst kind. On an
     unscorable requirement (work authorization, location) 'unknown' is an open
     question for the candidate, not a gap.
+
+    Boilerplate ("strong communication skills") is never a gap: it is excluded
+    from the verdict, and listing it as something to fix is noise that buries
+    the gaps that matter.
     """
+    req = job.by_id(row.requirement_id)
+    if req is not None and req.boilerplate:
+        return False
     if row.grade in {"none", "transferable"}:
         return True
-    req = job.by_id(row.requirement_id)
     return (
         row.grade == "unknown"
         and req is not None

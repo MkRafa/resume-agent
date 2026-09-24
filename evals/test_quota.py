@@ -98,3 +98,24 @@ def test_empty_chain_is_not_tripped():
 )
 def test_provider_extraction(model, provider):
     assert _QuotaTracker.provider_of(model) == provider
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ('{"error": {"details": [{"retryDelay": "21s"}]}}', 22.0),  # Gemini
+        ("Rate limit reached ... Please try again in 9.81s. Need more tokens?", 10.81),  # Groq
+        ("Please try again in 1m2.5s.", 63.5),
+        ("Please try again in 340ms.", 1.34),
+        ("Please try again in 5m0s.", 90.0),  # capped at MAX_BACKOFF
+        ("Service unavailable", None),
+    ],
+)
+def test_provider_retry_hint_is_honoured(message, expected):
+    """Regression: only Gemini's retryDelay was parsed. Groq's "try again in
+    9.81s" fell through to a 1+3+9s schedule that gave up before its
+    tokens-per-minute window reset - failing the verify step."""
+    from app.models import _suggested_delay
+
+    got = _suggested_delay(RuntimeError(message))
+    assert got == (pytest.approx(expected) if expected is not None else None)

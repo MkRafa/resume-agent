@@ -22,6 +22,7 @@ def _settings(**overrides) -> Settings:
     s.model_match = "gemini/gemini-3.5-flash"
     s.model_verify = VERIFY
     s.fallbacks = FALLBACKS
+    s.verify_fallbacks = ""  # pinned: Settings() reads the developer's .env
     for k, v in overrides.items():
         setattr(s, k, v)
     return s
@@ -39,7 +40,7 @@ def test_other_nodes_keep_the_full_chain():
     assert VERIFY in chain
 
 
-def test_verifier_never_fails_over():
+def test_verifier_never_uses_the_shared_chain():
     assert _settings().models_for("verify") == [VERIFY]
 
 
