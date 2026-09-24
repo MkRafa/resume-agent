@@ -30,7 +30,7 @@ The gold set is synthetic and small. These numbers are a floor, not proof. See
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TD
   P["Profile<br/>PDF · DOCX · text"] --> G["Career graph<br/>atomic, cited facts"]
   J["Job description"] --> Q["Requirements<br/>gates · musts · nice"]
   G --> M["Grade evidence<br/>per requirement"]
