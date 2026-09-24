@@ -58,6 +58,14 @@ class Settings:
         )
     )
 
+    # The verifier's own failover, off by default. Kept separate from the shared
+    # chain because it must stay out of the tailorer's family - a model in the
+    # same family checking the resume shares its blind spots. Anything in that
+    # family is dropped from this list rather than silently used.
+    verify_fallbacks: str = field(
+        default_factory=lambda: os.getenv("MODEL_VERIFY_FALLBACKS", "")
+    )
+
     def model_for(self, node: str) -> str:
         return {
             "extract": self.model_extract,
@@ -71,17 +79,20 @@ class Settings:
         """Primary model followed by the fallback chain, deduplicated.
 
         Independence between the tailorer and the verifier is guarded in both
-        directions. The verifier never fails over (the shared chain is Gemini,
-        the tailorer's family), and the tailorer never fails over to a model in
-        the verifier's family - otherwise a rate-limited Gemini quietly hands
-        the writing to the same model that then checks it.
+        directions. The verifier fails over only to MODEL_VERIFY_FALLBACKS
+        outside the tailorer's family, never to the shared chain; and the
+        tailorer never fails over to a model in the verifier's family -
+        otherwise a rate-limited Gemini quietly hands the writing to the same
+        model that then checks it.
 
         Only fallbacks are filtered. A primary MODEL_TAILOR in the verifier's
         family is an explicit choice (e.g. all-local Ollama) and is respected.
         """
         primary = self.model_for(node)
         if node == "verify":
-            return [primary]
+            writer = model_family(self.model_tailor)
+            own = [m.strip() for m in self.verify_fallbacks.split(",") if m.strip()]
+            return list(dict.fromkeys([primary, *(m for m in own if model_family(m) != writer)]))
         fallbacks = [m.strip() for m in self.fallbacks.split(",") if m.strip()]
         if node == "tailor":
             verifier = model_family(self.model_verify)

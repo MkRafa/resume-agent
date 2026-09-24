@@ -23,8 +23,10 @@ accuracy figure, which would hide whichever failure happened to be rarer.
 Severity matters too: a `warning` does not block the render. Catching a
 fabrication but calling it a warning is a partial credit, not a pass.
 
-Raw verifier output is cached per case by content hash, so re-scoring the
-rubric costs nothing. Only a change to verify.md needs the models again.
+Raw verifier output - before the deterministic verify_filter - is cached per
+case by content hash, prompt and model; the filter is applied at scoring time.
+So re-scoring the rubric or changing verify_filter.py costs nothing, and only
+a change to verify.md (or MODEL_VERIFY) needs the model again.
 """
 
 from __future__ import annotations
@@ -72,7 +74,9 @@ def _cache_path(case: dict) -> Path:
         {"atoms": case["atoms"], "bullet": case["bullet"]}, sort_keys=True
     ).encode()
     digest = hashlib.sha256(payload + prompt + model).hexdigest()[:12]
-    return CACHE / f"vfy_{case['id']}_{digest}.json"
+    # "vfyraw_": pre-filter output. The old "vfy_" files hold post-filter
+    # output and must not be read as raw.
+    return CACHE / f"vfyraw_{case['id']}_{digest}.json"
 
 
 def _build_state(case: dict) -> dict:
@@ -98,17 +102,23 @@ def _build_state(case: dict) -> dict:
 
 
 def run_case(case: dict, *, offline: bool = False) -> dict:
-    from app.nodes.generate import verify
+    from app.nodes.generate import verify_raw
+    from app.tools.verify_filter import soften_known_false_positives
 
+    state = _build_state(case)
     cached = _cache_path(case)
     if cached.exists():
         report = VerifyReport.model_validate_json(cached.read_text())
     elif offline:
         return {"id": case["id"], "error": "no cached output (run online once first)"}
     else:
-        report = verify(_build_state(case))["verify_report"]  # type: ignore[arg-type]
+        report = verify_raw(state)  # type: ignore[arg-type]
         CACHE.mkdir(parents=True, exist_ok=True)
         cached.write_text(report.model_dump_json(indent=2))
+
+    # Applied on every scoring, never cached - so the result always reflects
+    # the current filter, exactly as the pipeline would apply it.
+    soften_known_false_positives(report, state["graph"])
 
     blockers = report.blockers
     warnings = [f for f in report.flags if f.severity == "warning"]

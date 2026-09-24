@@ -247,6 +247,11 @@ Prompt layout is deliberate: `[system][career graph ← stable][JD ← varies]`.
 The graph is identical across every application one candidate makes, so keeping
 it first and unchanged makes it the cacheable prefix.
 
+**The verifier has its own, opt-in failover.** `MODEL_VERIFY_FALLBACKS` is
+empty by default; anything in it from the tailorer's family is dropped. The
+reverse is enforced too: the tailorer's fallbacks skip the verifier's family,
+so a rate-limited Gemini can never hand the writing to the model that checks it.
+
 **Failover rotates models before sleeping.** Free-tier quotas are *per model*
 ("limit: 20, model: gemini-3.7-flash"), so when one is exhausted a sibling is
 usually free. Sleeping on the primary first wastes a minute to learn what the
@@ -386,6 +391,8 @@ escalates one — so a real fabrication cannot be filtered away.
 
 The cache key includes the prompt text and the model id. Without that, editing
 `verify.md` replays stale output and reports the old behaviour as the new one.
+The cache holds the model's **raw** output; `verify_filter.py` is applied at
+scoring time, so a filter change shows up immediately, `--offline` included.
 
 ### Claim tracing (layer 5)
 

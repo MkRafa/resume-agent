@@ -57,3 +57,11 @@ def test_model_family():
     assert model_family("gemini/gemini-3.5-flash") == "gemini"
     assert model_family("groq/openai/gpt-oss-120b") == "gpt"
     assert model_family("acme/unknown-model") == "acme/unknown-model"
+
+
+def test_verifier_fallbacks_are_opt_in_and_cross_family():
+    """A verifier with no failover kills the run at the last step whenever its
+    provider is down. Its fallbacks are its own list, and anything in the
+    tailorer's family is dropped from it."""
+    s = _settings(verify_fallbacks="gemini/gemini-flash-latest,mistral/mistral-large-latest")
+    assert s.models_for("verify") == [VERIFY, "mistral/mistral-large-latest"]
