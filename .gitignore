@@ -11,10 +11,15 @@ __pycache__/
 # Runtime data is PII by default: uploaded resumes, extracted career graphs,
 # the SQLite store and generated documents. Ignore the whole directory and
 # allow back only the synthetic fixtures we deliberately ship.
-data/
+#
+# `data/*`, not `data/`: git cannot re-include a file inside an ignored
+# directory, so with `data/` the negations below silently never applied.
+data/*
 !data/profiles/
+data/profiles/*
 !data/profiles/sample_*
 !data/jds/
+data/jds/*
 !data/jds/sample_*
 
 # Cached model output for the gold runner — regenerable, and holds extracted

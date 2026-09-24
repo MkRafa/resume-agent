@@ -26,8 +26,8 @@ JS polling: no build step, no CDN, works offline.
   questions, gaps and adjacent roles
 - **the review gate** — when the verifier can't trace a claim, the resume is
   withheld until a human ticks each one. Unticked blockers keep it blocked.
-- **`/profiles/{key}`** — the accumulated career graph and every application made
-  against it
+- **`/profiles/{key}`** — the candidate's latest career graph and every
+  application made against it
 
 Runs execute in a worker thread (30–60s, ~7 model calls) with status persisted
 to SQLite, so a page refresh or a second browser sees the same state.
@@ -280,8 +280,13 @@ the audit log possible.
 
 - `profiles` keyed by the identity rule; `profile_keys` maps every alternate key
   to one profile, so the data model is **multi-tenant before there is any login**
-- `runs` holds the full state (job, scorecard, resume, verify report, artifacts)
-  so a refresh or a second browser sees the same thing
+- `runs` holds the full state (career graph snapshot, job, scorecard, resume,
+  verify report, artifacts) so a refresh or a second browser sees the same thing
+- a profile holds the **latest** extraction — each run replaces it, and atom
+  ids are reassigned every time. That is why each run keeps its own graph
+  snapshot: a review approved later still renders against the facts that
+  resume was written from. Merging extractions into one growing graph is M2
+  work (it needs atom de-duplication and stable ids)
 - `applications` is **deliberately unused** — outcome data ("did this get a
   reply?") is what tells you whether your verdicts are honest, and it cannot be
   backfilled
@@ -424,8 +429,11 @@ Three things keep this affordable on a free tier:
 1. **It stops at the verdict** — 3 calls per case, not 7. Tailoring and
    verification are a separate concern with their own eval.
 2. **Extractions and JD parses are cached by content hash**, so 8 profiles
-   across 22 cases costs 8 extractions, not 22. Cache invalidates when a
-   fixture changes.
+   across 22 cases costs 8 extractions, not 22. Every key includes the fixture,
+   the prompt that produced it and the model id, and scorecard rows are keyed
+   on the extracted graph and parsed job — so editing any prompt or switching
+   `MODEL_*` invalidates exactly what it affects instead of replaying stale
+   output as if it were new.
 3. **Scorecard rows are cached separately from the verdict.** The verdict is
    deterministic Python over those rows, so every change to a threshold, to
    gate handling, or to the unknown/unscorable logic re-scores the whole set

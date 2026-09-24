@@ -179,6 +179,9 @@ def _execute(run_id: str, **kwargs) -> None:
         "jd_title": job.title if job else None,
         "jd_company": job.company if job else None,
         "verdict": scorecard.verdict if scorecard else None,
+        # Snapshot, not a reference to the profile: the profile is replaced by
+        # the next extraction, and atom ids (f_001...) are reassigned each time.
+        "graph_json": graph,
         "job_json": job,
         "scorecard_json": scorecard,
         "resume_json": final.get("resume"),
@@ -210,11 +213,19 @@ def resolve_and_render(run_id: str, accepted_claims: list[str]) -> None:
     if not run or not run["resume"]:
         return
 
-    profile = store.get_profile(run["profile_key"]) if run["profile_key"] else None
-    if not profile:
-        store.update_run(run_id, status="failed", error="Profile missing for this run.")
-        return
-    graph, _ = profile
+    # The resume's fact_ids refer to the graph this run extracted. The stored
+    # profile may since have been replaced by a later run for the same person,
+    # with different atoms under the same ids - rendering against that would
+    # check provenance and claims against the wrong facts.
+    graph = run["graph"]
+    if graph is None:
+        # Runs recorded before graph snapshots existed: the profile is the only
+        # copy left, and is correct unless the person has been re-run since.
+        profile = store.get_profile(run["profile_key"]) if run["profile_key"] else None
+        if not profile:
+            store.update_run(run_id, status="failed", error="Profile missing for this run.")
+            return
+        graph, _ = profile
 
     state = {
         "resume": run["resume"],

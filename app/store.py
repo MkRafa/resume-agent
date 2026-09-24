@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS runs (
     jd_title       TEXT,
     jd_company     TEXT,
     verdict        TEXT,
+    graph_json     TEXT,                   -- the career graph THIS run used
     job_json       TEXT,
     scorecard_json TEXT,
     resume_json    TEXT,
@@ -96,9 +97,19 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+# Columns added after the first schema shipped. CREATE TABLE IF NOT EXISTS
+# does not touch an existing table, so these are applied to older databases.
+_MIGRATIONS = {"runs": {"graph_json": "TEXT"}}
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        for table, columns in _MIGRATIONS.items():
+            have = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for column, decl in columns.items():
+                if column not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --------------------------------------------------------------------------
@@ -221,6 +232,9 @@ def get_run(run_id: str) -> dict[str, Any] | None:
         return None
 
     run = dict(row)
+    run["graph"] = (
+        CareerGraph.model_validate_json(run["graph_json"]) if run.get("graph_json") else None
+    )
     run["job"] = JobSpec.model_validate_json(run["job_json"]) if run["job_json"] else None
     run["scorecard"] = (
         Scorecard.model_validate_json(run["scorecard_json"]) if run["scorecard_json"] else None

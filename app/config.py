@@ -68,15 +68,36 @@ class Settings:
     def models_for(self, node: str) -> list[str]:
         """Primary model followed by the fallback chain, deduplicated.
 
-        The verifier is excluded from the Gemini fallbacks on purpose: failing
-        it over to the same family as the tailorer would silently discard the
-        independence the whole verification pass depends on.
+        Independence between the tailorer and the verifier is guarded in both
+        directions. The verifier never fails over (the shared chain is Gemini,
+        the tailorer's family), and the tailorer never fails over to a model in
+        the verifier's family - otherwise a rate-limited Gemini quietly hands
+        the writing to the same model that then checks it.
+
+        Only fallbacks are filtered. A primary MODEL_TAILOR in the verifier's
+        family is an explicit choice (e.g. all-local Ollama) and is respected.
         """
         primary = self.model_for(node)
         if node == "verify":
             return [primary]
-        chain = [primary, *(m.strip() for m in self.fallbacks.split(",") if m.strip())]
-        return list(dict.fromkeys(chain))
+        fallbacks = [m.strip() for m in self.fallbacks.split(",") if m.strip()]
+        if node == "tailor":
+            verifier = model_family(self.model_verify)
+            fallbacks = [m for m in fallbacks if model_family(m) != verifier]
+        return list(dict.fromkeys([primary, *fallbacks]))
+
+
+# Substrings that identify a model family regardless of which provider serves
+# it: groq/llama-3.3-70b and openrouter/meta-llama/llama-3.1-8b are both Llama.
+_FAMILIES = ("gemini", "gemma", "llama", "gpt", "claude", "mistral", "mixtral",
+             "qwen", "deepseek", "kimi", "command")
+
+
+def model_family(model: str) -> str:
+    """Family of a LiteLLM model id; the full id when the family is unknown,
+    so an unrecognised model only ever collides with itself."""
+    name = model.split("/", 1)[-1].lower()
+    return next((f for f in _FAMILIES if f in name), model.lower())
 
 
 settings = Settings()

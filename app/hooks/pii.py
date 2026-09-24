@@ -49,3 +49,16 @@ def restore(text: str, mapping: dict[str, str]) -> str:
     for placeholder, original in mapping.items():
         text = text.replace(placeholder, original)
     return text
+
+
+def reapply(text: str, mapping: dict[str, str]) -> str:
+    """Inverse of `restore`: swap known originals back to their placeholders.
+
+    For anything derived from restored output that is about to be sent to a
+    provider again - a validation error quotes the input it rejected, so it can
+    carry the real values. Longest originals first, so one that contains
+    another is not half-replaced.
+    """
+    for placeholder, original in sorted(mapping.items(), key=lambda kv: -len(kv[1])):
+        text = text.replace(original, placeholder)
+    return text

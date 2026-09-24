@@ -11,10 +11,10 @@ Two things make this affordable on a free tier:
    exercised, because verdict agreement is what this eval measures. That is 3
    model calls per case instead of 7.
 
-2. **Extractions and JD parses are cached on disk**, keyed by file content.
-   Eight profiles across 22 cases means eight extractions, not 22 - and on a
-   re-run after a prompt change to the *grader*, zero. Cache invalidates
-   automatically when a fixture's content changes.
+2. **Extractions and JD parses are cached on disk**, keyed by file content,
+   prompt and model. Eight profiles across 22 cases means eight extractions,
+   not 22 - and on a re-run after a prompt change to the *grader*, zero. Each
+   cache invalidates when its fixture, its prompt or its model changes.
 
 Error weighting is asymmetric: calling a weak candidate strong burns one of
 their limited applications and their trust in the tool; being too strict is
@@ -51,8 +51,23 @@ VERDICTS = ["not_matching", "partial_match", "strong_match"]
 SHORT = {"not_matching": "no", "partial_match": "partial", "strong_match": "strong"}
 
 
+def _producer(skill: str, model: str) -> bytes:
+    """What produced a cached output, beyond its input: the prompt and the model.
+
+    Without these in the key, editing a prompt or switching MODEL_* replays the
+    old output and the eval reports the old behaviour as if it were the new one.
+    """
+    return (ROOT / "app" / "skills" / f"{skill}.md").read_bytes() + model.encode()
+
+
 def _key(path: Path, kind: str) -> Path:
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    from app.config import settings
+
+    skill, model = {
+        "graph": ("extract_profile", settings.model_extract),
+        "job": ("parse_jd", settings.model_parse),
+    }[kind]
+    digest = hashlib.sha256(path.read_bytes() + _producer(skill, model)).hexdigest()[:16]
     return CACHE / f"{kind}_{path.stem}_{digest}.json"
 
 
@@ -97,8 +112,17 @@ def load_job(path: Path) -> JobSpec:
     return job
 
 
-def _rows_cache_path(profile: Path, jd: Path) -> Path:
-    digest = hashlib.sha256(profile.read_bytes() + jd.read_bytes()).hexdigest()[:16]
+def _rows_cache_path(profile: Path, jd: Path, graph: CareerGraph, job: JobSpec) -> Path:
+    """Keyed on the grader's actual inputs - the extracted graph and parsed job,
+    not the fixture files - so a change to either upstream prompt invalidates
+    the grades built on top of it."""
+    from app.config import settings
+
+    digest = hashlib.sha256(
+        graph.model_dump_json().encode()
+        + job.model_dump_json().encode()
+        + _producer("match_grader", settings.model_match)
+    ).hexdigest()[:16]
     return CACHE / f"rows_{profile.stem}__{jd.stem}_{digest}.json"
 
 
@@ -123,7 +147,7 @@ def run_case(case: dict, *, offline: bool = False) -> dict:
     job = load_job(jd_path)
     years = load_years(profile_path)
 
-    rows_path = _rows_cache_path(profile_path, jd_path)
+    rows_path = _rows_cache_path(profile_path, jd_path, graph, job)
 
     if rows_path.exists():
         # Re-score cached grades through the current rule.

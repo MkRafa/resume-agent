@@ -26,7 +26,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.hooks import log_cost, redact, restore
+from app.hooks import log_cost, reapply, redact, restore
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -338,14 +338,18 @@ def complete_json(
             max_tokens=max_tokens,
         )
         log_cost(node, model, response)
+        # `raw` stays redacted: it is what goes back to the provider on a retry.
+        # Only the parse sees the restored values.
         raw = response.choices[0].message.content or ""
-        if settings.redact_pii:
-            raw = restore(raw, placeholders)
+        restored = restore(raw, placeholders) if settings.redact_pii else raw
 
         try:
-            return schema.model_validate_json(_extract_json(raw))
+            return schema.model_validate_json(_extract_json(restored))
         except (ValidationError, json.JSONDecodeError) as exc:
             last_error = exc
+            # The validation error quotes the restored input it rejected, so it
+            # is re-redacted before being sent back too.
+            error_text = reapply(str(exc), placeholders) if settings.redact_pii else str(exc)
             messages.extend(
                 [
                     {"role": "assistant", "content": raw[:4000]},
@@ -353,7 +357,7 @@ def complete_json(
                         "role": "user",
                         "content": (
                             "That output failed schema validation with:\n"
-                            f"{exc}\n\nReturn corrected JSON only."
+                            f"{error_text}\n\nReturn corrected JSON only."
                         ),
                     },
                 ]
