@@ -32,7 +32,7 @@ class Settings:
     # Deliberately a different family from model_tailor: a model asked to check
     # its own output shares its own blind spots.
     model_verify: str = field(
-        default_factory=lambda: os.getenv("MODEL_VERIFY", "groq/llama-3.3-70b-versatile")
+        default_factory=lambda: os.getenv("MODEL_VERIFY", "groq/openai/gpt-oss-120b")
     )
 
     phone_default_region: str = field(

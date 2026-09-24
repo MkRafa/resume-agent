@@ -241,7 +241,7 @@ extract   gemini-3.5-flash    cheap, structured output
 parse     gemini-3.5-flash    low judgement
 match     gemini-3.5-flash    highest-judgement node — first to upgrade on a paid key
 tailor    gemini-3.5-flash    user-visible quality
-verify    groq/llama-3.3-70b  DIFFERENT FAMILY, deliberately
+verify    groq/gpt-oss-120b   DIFFERENT FAMILY, deliberately
 ```
 
 Prompt layout is deliberate: `[system][career graph ← stable][JD ← varies]`.
@@ -368,7 +368,24 @@ accuracy figure, because they cost very different things:
 - a **false positive** blocks a truthful resume, and teaches the reviewer to
   tick every box without reading — silently turning the gate into a rubber stamp
 
-**Baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
+**Current baseline (`gpt-oss-120b` on Groq, 2026-09-24, all 22 live):**
+
+```
+Misses            0 / 11     fabrication that would ship on a real resume
+False positives   1 / 11     truthful resumes blocked
+Exactly correct  17 / 22     right call AND right severity
+```
+
+The verifier moved to `gpt-oss-120b` because Groq retired
+`llama-3.3-70b-versatile` — every run failed at the verify step. Still zero
+misses. The one false positive, `clean_merged_atoms`, is arguably a **labelling
+error, not a model error**: the fixture bullet says "authoring *its*
+runbooks" (the route-optimisation API's), while the source atom says the
+runbooks were for the shipment and billing services. The model flagged exactly
+that misattribution. Llama let it through. The fixture needs a decision —
+rewrite the bullet into a faithful merge, or relabel it `flag`.
+
+**Previous baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
 
 ```
 Misses            0 / 11     fabrication that would ship on a real resume
@@ -619,9 +636,10 @@ proof.
 - **Grader calibration: 82% agreement, 0 over-generous** (22 cases,
   `gemini-3.5-flash`, 2026-08-15). Good enough to build on; not yet good enough
   to trust unsupervised. See the confusion matrix above.
-- **Verifier: 0/11 misses, 0/11 false positives** on 22 hand-built pairs
-  (`llama-3.3-70b`), with two false-positive classes enforced in Python
-  rather than the prompt. A small set — see [Verifier eval](#verifier-eval).
+- **Verifier: 0/11 misses, 1/11 false positives** on 22 hand-built pairs
+  (`gpt-oss-120b`; the one FP is arguably a mislabelled fixture), with two
+  false-positive classes enforced in Python rather than the prompt. A small
+  set — see [Verifier eval](#verifier-eval).
 - **Images and scanned PDFs are not read.** Images are refused; a scan is
   detected and the user asked to paste text. A multimodal rung would send
   unredacted pixels to the provider, so it is a decision, not a default.
