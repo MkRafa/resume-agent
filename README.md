@@ -1,56 +1,85 @@
 # resume-agent
 
-Matches a candidate against a job description, grades the evidence requirement
-by requirement, and — when it's a match — writes a tailored resume in which
-every bullet traces back to a fact the candidate actually supplied.
+[![tests](https://github.com/MkRafa/resume-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/MkRafa/resume-agent/actions/workflows/tests.yml)
 
-**Status:** M0 (pipeline) and M1 (web app, persistence, human review gate) are
-built. Grader calibration against the gold set is the open work — see
-[Evaluation](#evaluation).
+**Tells a candidate whether they match a job, with cited evidence for every
+requirement. When they do, it writes a tailored resume in which every claim
+traces back to a fact they actually supplied, and then checks it twice.**
 
-- [Architecture](#architecture) — the full end-to-end map
-- [Web app](#web-app) · [Setup](#setup) · [Evaluation](#evaluation)
-- [Gotchas already paid for](#gotchas-already-paid-for) — the bugs, and why they happened
+![Evidence scorecard for a live run: a partial match, with every grade citing the career facts behind it](docs/img/run-scorecard.png)
 
-## Web app
+<sub>A live run on the synthetic sample profile. "Strong Go" grades `none`
+because the candidate wrote "Go (basic)", so the verdict is a partial match,
+not strong. Every grade cites the atomic facts (`f_001`…) it rests on.</sub>
 
-```bash
-cd resume-agent && ./.venv/bin/uvicorn app.web:app --reload --port 8000
+## Results
+
+Measured, not asserted. Each eval reports its failure modes separately,
+because they cost the candidate different things.
+
+| What | Result | How it's measured |
+|---|---|---|
+| **Match verdict** vs human labels | **18/22 agree (82%), 0 over-generous.** All 4 errors are on the cautious side | 22 hand-labelled profile × JD pairs · `gemini-3.5-flash` · Aug 2026 |
+| **Fact-checker** catches fabrication | **0/12 fabrications missed, 0/11 truthful bullets blocked** | 23 hand-built pairs · `gpt-oss-120b` · Sep 2026 |
+| **Claim tracing** on every resume | Numbers, tools, titles, dates and skills checked against their source facts, with no model involved | Runs on every render; caught a live resume leading with a skill the candidate rated "basic" |
+| **Pipeline, store, web** | Unit and plumbing tests, **no API calls** | CI on every push |
+
+The gold set is synthetic and small. These numbers are a floor, not proof. See
+[Evaluation](#evaluation) for the confusion matrix and every known miss.
+
+## How it works
+
+```mermaid
+flowchart LR
+  P["Profile<br/>PDF · DOCX · text"] --> G["Career graph<br/>atomic, cited facts"]
+  J["Job description"] --> Q["Requirements<br/>gates · musts · nice"]
+  G --> M["Grade evidence<br/>per requirement"]
+  Q --> M
+  M --> V{"Verdict<br/>fixed rules"}
+  V -- "not matching" --> X["Gap report +<br/>roles that fit"]
+  V -- "partial" --> X
+  X -- "partial" --> S
+  V -- "strong" --> S["Select facts"]
+  S --> T["Tailor<br/>each bullet cites facts"]
+  T --> F["Verify<br/>other model family,<br/>never sees the JD"]
+  F -- "unsupported claim" --> H["Human review gate"]
+  F -- "clean" --> R["Render + claim trace<br/>+ provenance log"]
+  H --> R
 ```
 
-One Python service — pipeline, store and UI. Server-rendered Jinja with vanilla
-JS polling: no build step, no JS dependencies. The only external request is
-Google Fonts; offline, the UI falls back to system fonts.
+Seven model calls per full run, with everything else in plain Python. Four
+decisions do most of the work:
 
-- **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD)
-- **`/runs/{id}`** — live progress, then the evidence scorecard, verdict, open
-  questions, gaps and adjacent roles
-- **the review gate** — when the verifier can't trace a claim, the resume is
-  withheld until a human ticks each one. Unticked blockers keep it blocked.
-- **`/profiles/{key}`** — the candidate's latest career graph and every
-  application made against it
+- **The verdict is computed, not generated.** The model grades evidence per
+  requirement, and a fixed rule turns the grades into a verdict. That makes it
+  explainable ("you failed r_02"), stable across runs and testable.
+- **The fact-checker is adversarial, cross-family and blind to the job
+  description.** A model checking its own family's writing shares its blind
+  spots, and a checker that knows the target job rationalises stretches.
+- **Anything computable is computed.** Years of experience, keyword coverage
+  and claim tracing are all Python, because models get overlapping date ranges
+  wrong in ways that look plausible.
+- **Nothing ships unverified.** Unresolved claims block the render until a
+  person accepts each one.
 
-Runs execute in a worker thread (30–60s, ~7 model calls) with status persisted
-to SQLite, so a page refresh or a second browser sees the same state.
+It is deliberately **not an agent loop**: a resume pipeline that takes a
+different path each run is a bug. See [Agents](#agents) for what is and isn't
+agentic here.
 
-Profiles are keyed by the email/phone rule with alternate-key lookup, so the
-data model is multi-tenant before there is any login. Auth is a wrapper to add
-later, not a migration.
-
-## Setup
-
-```bash
-cd resume-agent && python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
-```
-
-Get a free Gemini key at <https://aistudio.google.com/apikey> (no card, ~30s)
-and a free Groq key at <https://console.groq.com/keys>, then:
+## Quickstart
 
 ```bash
-cp .env.example .env
+python3 -m venv .venv && ./.venv/bin/pip install -r requirements.txt
+cp .env.example .env    # add a free GEMINI_API_KEY and GROQ_API_KEY
+./.venv/bin/uvicorn app.web:app --port 8000
 ```
 
-Fill in `GEMINI_API_KEY` and `GROQ_API_KEY`. Run:
+Open <http://localhost:8000> and upload `data/profiles/sample_resume.md` with
+`data/jds/sample_jd.md`. Both are synthetic. Keys are free, no card needed:
+[Gemini](https://aistudio.google.com/apikey) and
+[Groq](https://console.groq.com/keys).
+
+Or from the CLI:
 
 ```bash
 ./.venv/bin/python cli.py --profile-file data/profiles/sample_resume.md --jd-file data/jds/sample_jd.md
@@ -58,7 +87,43 @@ Fill in `GEMINI_API_KEY` and `GROQ_API_KEY`. Run:
 
 Both sides accept `--profile-text` / `--profile-file` and `--jd-text` /
 `--jd-file` (PDF, DOCX, TXT, MD). Pass `--email` or `--phone` when the document
-has no contact details.
+has no contact details. Tests need no keys: `./.venv/bin/python -m pytest evals/ -q`.
+
+**Status:** the pipeline (M0) and the web app with persistence and the human
+review gate (M1) are built. Next is growing the gold set and the enrichment
+interviewer (M2).
+
+- [Architecture](#architecture): the full end-to-end map
+- [Web app](#web-app) · [Evaluation](#evaluation) · [Known limitations](#known-limitations)
+- [Gotchas already paid for](#gotchas-already-paid-for): the bugs, and why they happened
+
+---
+
+## Web app
+
+One Python service holds the pipeline, the store and the UI. It is
+server-rendered Jinja with vanilla JS polling: no build step and no JS
+dependencies. The only external request is Google Fonts; offline, the UI falls
+back to system fonts.
+
+- **`/`**: paste or upload a profile and a JD (PDF, DOCX, TXT, MD)
+- **`/runs/{id}`**: live progress, then the evidence scorecard, verdict, open
+  questions, gaps and adjacent roles
+- **the review gate**: when the verifier can't trace a claim, the resume is
+  withheld until a person ticks each one. Unticked blockers keep it blocked.
+- **`/profiles/{key}`**: the candidate's latest career graph and every
+  application made against it
+
+![The tailored resume from the same run: every bullet traces to a cited fact](docs/img/tailored-resume.png)
+
+Runs execute in a worker thread (~7 model calls; 30–60s when providers are
+healthy, several minutes when free-tier models are overloaded and failover
+kicks in), with status persisted to SQLite so a refresh or a second browser
+sees the same state.
+
+Profiles are keyed by the email/phone rule with alternate-key lookup, so the
+data model is multi-tenant before there is any login. Auth is a wrapper to add
+later, not a migration.
 
 ## Architecture
 
