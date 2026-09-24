@@ -79,11 +79,6 @@ def resolve_identity(
     return Identity(primary_key=primary, keys=keys, email=e, phone=p)
 
 
-def lookup_keys(identity: Identity) -> list[str]:
-    """Every key that should resolve to this profile. Query stores with all of them."""
-    return identity.keys
-
-
 def merge_identities(existing: Identity, incoming: Identity) -> Identity:
     """Union two identities that resolved to the same profile.
 

@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS runs (
     jd_title       TEXT,
     jd_company     TEXT,
     verdict        TEXT,
+    graph_json     TEXT,                   -- the career graph THIS run used
     job_json       TEXT,
     scorecard_json TEXT,
     resume_json    TEXT,
@@ -96,9 +97,19 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+# Columns added after the first schema shipped. CREATE TABLE IF NOT EXISTS
+# does not touch an existing table, so these are applied to older databases.
+_MIGRATIONS = {"runs": {"graph_json": "TEXT"}}
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        for table, columns in _MIGRATIONS.items():
+            have = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for column, decl in columns.items():
+                if column not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 # --------------------------------------------------------------------------
@@ -221,6 +232,9 @@ def get_run(run_id: str) -> dict[str, Any] | None:
         return None
 
     run = dict(row)
+    run["graph"] = (
+        CareerGraph.model_validate_json(run["graph_json"]) if run.get("graph_json") else None
+    )
     run["job"] = JobSpec.model_validate_json(run["job_json"]) if run["job_json"] else None
     run["scorecard"] = (
         Scorecard.model_validate_json(run["scorecard_json"]) if run["scorecard_json"] else None
@@ -235,6 +249,27 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     run["artifacts"] = json.loads(run["artifacts_json"]) if run["artifacts_json"] else {}
     run["notes"] = json.loads(run["notes_json"]) if run["notes_json"] else []
     return run
+
+
+def fail_interrupted_runs() -> int:
+    """Mark runs a restart orphaned as failed. Call once, at process start.
+
+    Runs execute in an in-process thread pool, so a run still `queued` or
+    `running` when the process starts has no worker and never will - without
+    this it shows a spinner forever. `uvicorn --reload` restarts on every save,
+    so this is routine in development, not an edge case.
+
+    Assumes one process owns the store (true of the thread-pool design). With
+    several workers, one starting up would fail another's live runs.
+    """
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE runs SET status = 'failed', stage = 'Interrupted', "
+            "error = 'The server restarted while this run was in progress. Start it again.', "
+            "updated_at = ? WHERE status IN ('queued', 'running')",
+            (_now(),),
+        )
+        return cur.rowcount
 
 
 def list_runs(profile_key: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

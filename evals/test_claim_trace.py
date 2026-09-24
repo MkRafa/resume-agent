@@ -129,3 +129,164 @@ def test_summarise_reports_clean_rate():
     ])])
     s = summarise(trace_claims(r, g), r)
     assert s["bullets"] == 2 and s["affected_bullets"] == 1 and s["clean_rate"] == 0.5
+
+
+# --- Coverage beyond experience bullets -----------------------------------
+# Regression: only experience bullets used to be traced. A project bullet with
+# an invented language and metrics, and a summary inflating years, team size
+# and stack, both came back clean.
+
+
+def test_fabricated_project_bullet_is_caught():
+    g = graph(atom("Side project: a CLI for budgeting.", type="project"))
+    r = TailoredResume(projects=[Bullet(
+        text="Built a Rust budgeting CLI used by 5,000 people with 40% retention.",
+        fact_ids=["f_001"],
+    )])
+    problems = trace_claims(r, g)
+    assert {p.token for p in problems} >= {"rust", "5000", "40%"}
+    assert all(p.location == "projects#0" for p in problems)
+
+
+def test_fabricated_summary_is_caught():
+    g = graph(atom("Led the checkout redesign.", company="Acme", role="PM"))
+    r = TailoredResume(
+        summary="PM with 12 years leading 30-person teams on Kubernetes.",
+        summary_fact_ids=["f_001"],
+    )
+    problems = trace_claims(r, g, years=4.5)
+    assert {p.token for p in problems} == {"12", "30", "kubernetes"}
+    assert {p.section for p in problems} == {"summary"}
+
+
+def test_summary_may_state_the_computed_years():
+    g = graph(atom("Owned the settlement service.", company="Northwind"))
+    r = TailoredResume(summary="Backend engineer with 6+ years in payments.",
+                       summary_fact_ids=["f_001"])
+    assert trace_claims(r, g, years=6.4) == []
+
+
+def test_uncited_summary_is_an_orphan():
+    g = graph(atom("Did work."))
+    r = TailoredResume(summary="Seasoned engineer.")
+    assert kinds(trace_claims(r, g)) == {"orphan_bullet"}
+
+
+def test_skills_list_cannot_add_a_technology():
+    g = graph(atom("Built services in Python.", skills=["python", "postgres"]))
+    r = TailoredResume(skills=["Python", "PostgreSQL", "Kafka", "SQL"])
+    problems = trace_claims(r, g)
+    # Kafka is invented; SQL is the general form of Postgres, which is fine.
+    assert [p.token for p in problems] == ["kafka"]
+    assert problems[0].section == "skills"
+
+
+def test_education_year_is_checked():
+    g = graph(atom("B.E. Computer Science, R.V. College of Engineering, 2019", type="education"))
+    clean = TailoredResume(education=["B.E. Computer Science, RVCE, 2019"])
+    assert trace_claims(clean, g) == []
+    wrong = TailoredResume(education=["B.E. Computer Science, RVCE, 2017"])
+    assert [p.token for p in trace_claims(wrong, g)] == ["2017"]
+
+
+def _block(role: str, company: str = "Northwind Payments", start: str | None = "2022-03",
+           end: str | None = "present") -> TailoredResume:
+    return TailoredResume(experience=[ExperienceBlock(
+        company=company, role=role, start=start, end=end,
+        bullets=[Bullet(text="Owned the settlement service.", fact_ids=["f_001"])],
+    )])
+
+
+HEADER_ATOM = atom("Owned the settlement service.", company="Northwind Payments",
+                   role="Senior Backend Engineer", start="2022-03", end="present")
+
+
+def test_faithful_header_is_clean():
+    assert trace_claims(_block("Senior Backend Engineer"), graph(HEADER_ATOM)) == []
+    # Weaker title, abbreviation, and a shortened company name are all fine.
+    assert trace_claims(_block("Backend Engineer"), graph(HEADER_ATOM)) == []
+    assert trace_claims(_block("Sr. Backend Engineer", company="Northwind"), graph(HEADER_ATOM)) == []
+    # Same month written differently.
+    assert trace_claims(_block("Senior Backend Engineer", start="Mar 2022"), graph(HEADER_ATOM)) == []
+
+
+def test_title_inflation_is_caught():
+    problems = trace_claims(_block("Staff Backend Engineer"), graph(HEADER_ATOM))
+    assert [(p.kind, p.token) for p in problems] == [("unsourced_header", "role: Staff Backend Engineer")]
+
+
+def test_shifted_dates_and_wrong_company_are_caught():
+    problems = trace_claims(_block("Senior Backend Engineer", company="Stripe", start="2021-01"),
+                            graph(HEADER_ATOM))
+    assert {p.token for p in problems} == {"company: Stripe", "start: 2021-01"}
+
+
+# --- Tool names that are also English words --------------------------------
+
+
+def test_english_words_are_not_technologies():
+    """Regression: 'go' in 'go-to-market' registered as an invented language."""
+    g = graph(atom("Launched the checkout redesign with the design team."))
+    r = resume("Owned the go-to-market plan and made checkout go live; a spark of growth.",
+               ["f_001"])
+    assert trace_claims(r, g) == []
+
+
+def test_proper_noun_language_is_still_checked():
+    g = graph(atom("Built the ledger service in Python."))
+    assert [p.token for p in trace_claims(resume("Built the ledger service in Go.", ["f_001"]), g)] == ["go"]
+
+
+def test_summarise_counts_other_sections_separately():
+    g = graph(atom("Did work.", id="f_001"))
+    r = TailoredResume(
+        summary="Grew revenue 300%.", summary_fact_ids=["f_001"],
+        experience=[ExperienceBlock(company="X", role="Y", bullets=[
+            Bullet(text="Did work.", fact_ids=["f_001"])])],
+    )
+    s = summarise(trace_claims(r, g), r)
+    assert s["clean_rate"] == 1.0 and s["other_sections_affected"] == ["summary"]
+
+
+# --- Qualified skills ------------------------------------------------------
+# Regression from a live run: the candidate listed "Go (basic)", nothing on
+# their resume demonstrates Go, and the tailored skills line opened with a bare
+# "Go" - the exact oversell tailor.md forbids. Go is in the graph, so the
+# sourcing check passed it, and the verifier did not flag it either.
+
+SKILLS_ATOM = atom("Python, Go (basic), FastAPI, Postgres, familiar with Terraform",
+                   id="f_010", type="skill")
+WORK_ATOM = atom("Built the route API in Python/FastAPI.", id="f_001")
+
+
+def test_unqualified_basic_skill_is_flagged():
+    r = TailoredResume(skills=["Go", "Kafka", "Python"])
+    problems = trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))
+    assert [(p.kind, p.token) for p in problems if p.kind == "overstated_skill"] == [
+        ("overstated_skill", "Go (candidate: basic)")
+    ]
+
+
+def test_qualified_skill_listed_honestly_and_last_is_fine():
+    r = TailoredResume(skills=["Python", "FastAPI", "Go (basic)", "Terraform (familiar)"])
+    assert trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM)) == []
+
+
+def test_qualified_skill_may_not_lead_even_with_its_qualifier():
+    r = TailoredResume(skills=["Go (basic)", "Python"])
+    assert [p.token for p in trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))] == ["Go leads the list"]
+
+
+def test_qualifier_before_the_skill_counts_too():
+    r = TailoredResume(skills=["Python", "Terraform"])
+    assert [p.token for p in trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))] == [
+        "Terraform (candidate: familiar with)"
+    ]
+
+
+def test_demonstrated_skill_is_not_held_to_its_qualifier():
+    """If an achievement shows the skill in use, the modest self-rating in the
+    skills list does not bind the resume."""
+    shipped = atom("Rewrote the ledger service in Go, cutting p99 by half.", id="f_002")
+    r = TailoredResume(skills=["Go", "Python"])
+    assert trace_claims(r, graph(WORK_ATOM, shipped, SKILLS_ATOM)) == []

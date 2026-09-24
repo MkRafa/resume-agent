@@ -21,6 +21,9 @@ from app.schemas import CareerGraph, VerifyReport
 # accurate writing, not invention (the resume says "Kubernetes"; the atom says
 # "EKS"). Keys are what an atom might say, values what a resume may call it.
 TECH_GENERALISATIONS: dict[str, set[str]] = {
+    # Plain aliases - the same thing under another name (verify.md rule 2).
+    "kubernetes": {"k8s"},
+    "k8s": {"kubernetes"},
     "eks": {"kubernetes", "k8s"},
     "aks": {"kubernetes", "k8s"},
     "gke": {"kubernetes", "k8s"},
@@ -28,8 +31,8 @@ TECH_GENERALISATIONS: dict[str, set[str]] = {
     "kafka": {"event-driven", "event driven", "event streaming", "message queue", "pub/sub"},
     "kinesis": {"event-driven", "event driven", "event streaming"},
     "rabbitmq": {"event-driven", "event driven", "message queue"},
-    "postgres": {"relational database", "relational databases", "sql", "rdbms"},
-    "postgresql": {"relational database", "relational databases", "sql", "rdbms"},
+    "postgres": {"postgresql", "relational database", "relational databases", "sql", "rdbms"},
+    "postgresql": {"postgres", "relational database", "relational databases", "sql", "rdbms"},
     "mysql": {"relational database", "relational databases", "sql", "rdbms"},
     "fastapi": {"python", "rest api", "rest apis"},
     "django": {"python", "web framework"},

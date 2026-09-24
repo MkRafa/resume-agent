@@ -15,8 +15,9 @@ from app.tools.identity import NeedsIdentity
 
 
 def build_career_graph(state: PipelineState) -> dict:
-    doc = state["profile_doc"]
-    assert doc is not None
+    doc = state.get("profile_doc")
+    if doc is None or doc.looks_empty:
+        return {}  # intake already recorded why; match reports it at the join
 
     extracted = complete_json(
         ExtractedProfile,
@@ -59,8 +60,9 @@ def build_career_graph(state: PipelineState) -> dict:
 
 
 def parse_jd(state: PipelineState) -> dict:
-    doc = state["jd_doc"]
-    assert doc is not None
+    doc = state.get("jd_doc")
+    if doc is None or doc.looks_empty:
+        return {}  # intake already recorded why; match reports it at the join
 
     job = complete_json(
         JobSpec,

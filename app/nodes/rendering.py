@@ -14,7 +14,7 @@ from app.config import settings
 from app.hooks import block_on_unresolved_flags, write_audit_log
 from app.schemas import TailoredResume
 from app.state import PipelineState
-from app.tools import keyword_coverage, resume_to_text
+from app.tools import graph_years_of_experience, keyword_coverage, resume_to_text
 from app.tools.claim_trace import summarise, trace_claims
 
 
@@ -27,7 +27,8 @@ def _write_trace(out_dir: Path, untraced, stats: dict) -> Path:
             {
                 "summary": stats,
                 "items": [
-                    {"location": u.location, "kind": u.kind, "token": u.token, "text": u.text}
+                    {"section": u.section, "location": u.location, "kind": u.kind,
+                     "token": u.token, "text": u.text}
                     for u in untraced
                 ],
             },
@@ -148,12 +149,18 @@ def render(state: PipelineState) -> dict:
     # Deterministic second opinion on the LLM verifier. It shares nothing with
     # that pass - arithmetic and set membership rather than judgement - so a
     # fabrication both models find plausible still surfaces here.
-    untraced = trace_claims(resume, graph)
+    # The review-gate re-entry does not carry years_experience; recompute it
+    # rather than let the summary's (correct) years figure read as unsourced.
+    years = state.get("years_experience") or graph_years_of_experience(graph)
+    untraced = trace_claims(resume, graph, years=years)
     if untraced:
         stats = summarise(untraced, resume)
+        other = stats["other_sections_affected"]
         notes.append(
             f"Claim trace: {stats['affected_bullets']}/{stats['bullets']} bullets have "
-            f"untraceable content ({stats['by_kind']})"
+            f"untraceable content"
+            + (f"; also in {', '.join(other)}" if other else "")
+            + f" ({stats['by_kind']})"
         )
         notes.extend(f"Claim trace: {u}" for u in untraced[:8])
         artifacts["untraced_claims"] = str(_write_trace(out_dir, untraced, stats))

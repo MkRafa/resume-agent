@@ -7,7 +7,7 @@ models.py stays readable end to end.
 from app.hooks.audit import audit_provenance, write_audit_log
 from app.hooks.cost import cost_summary, log_cost
 from app.hooks.guardrail import RenderBlocked, block_on_unresolved_flags
-from app.hooks.pii import redact, restore
+from app.hooks.pii import reapply, redact, restore
 
 __all__ = [
     "RenderBlocked",
@@ -15,6 +15,7 @@ __all__ = [
     "block_on_unresolved_flags",
     "cost_summary",
     "log_cost",
+    "reapply",
     "redact",
     "restore",
     "write_audit_log",

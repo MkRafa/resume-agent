@@ -76,7 +76,8 @@ def tailor(state: PipelineState) -> dict:
         node="tailor",
         system=load("tailor"),
         variable_context=(
-            f"CANDIDATE: {graph.full_name or '(name withheld)'}\n"
+            # The name is not sent: the writer does not need it, redaction
+            # cannot pattern-match it, and it is set from the graph below.
             f"LOCATION: {graph.location or '?'}\n"
             f"LINKS: {', '.join(graph.links) or '(none)'}\n"
             # The JD block below states the employer's *minimum* years. Without
@@ -97,8 +98,7 @@ def tailor(state: PipelineState) -> dict:
         temperature=0.4,
     )
 
-    if graph.full_name and not resume.full_name:
-        resume.full_name = graph.full_name
+    resume.full_name = graph.full_name or resume.full_name
     contact = dict(resume.contact)
     if graph.identity.email:
         contact.setdefault("email", graph.identity.email)
@@ -115,6 +115,29 @@ def verify(state: PipelineState) -> dict:
     """Adversarial pass. Deliberately does NOT receive the job description:
     a verifier that can see what the text was optimised for rationalises its
     stretches instead of catching them."""
+    graph = state["graph"]
+    assert graph is not None
+    report = verify_raw(state)
+
+    # The model will not reliably honour two of the allowed transformations even
+    # when the prompt spells them out, so they are enforced in Python. This only
+    # ever downgrades blocker -> warning; nothing is deleted or escalated.
+    soften_known_false_positives(report, graph)
+
+    note = (
+        f"Verifier ({settings.model_verify}): {len(report.blockers)} blocker(s), "
+        f"{len(report.flags) - len(report.blockers)} warning(s)"
+    )
+    return {"verify_report": report, "notes": [note]}
+
+
+def verify_raw(state: PipelineState) -> VerifyReport:
+    """The model's own verdict, before the deterministic filter.
+
+    Separate so the verifier eval can cache what the model said and apply the
+    filter at scoring time - otherwise a change to verify_filter.py never shows
+    up in cached or --offline results.
+    """
     graph, resume = state["graph"], state["resume"]
     assert graph is not None and resume is not None
 
@@ -127,7 +150,7 @@ def verify(state: PipelineState) -> dict:
         for a in allowed
     )
 
-    report = complete_json(
+    return complete_json(
         VerifyReport,
         node="verify",
         system=load("verify"),
@@ -139,17 +162,6 @@ def verify(state: PipelineState) -> dict:
         ),
         temperature=0.0,
     )
-
-    # The model will not reliably honour two of the allowed transformations even
-    # when the prompt spells them out, so they are enforced in Python. This only
-    # ever downgrades blocker -> warning; nothing is deleted or escalated.
-    soften_known_false_positives(report, graph)
-
-    note = (
-        f"Verifier ({settings.model_verify}): {len(report.blockers)} blocker(s), "
-        f"{len(report.flags) - len(report.blockers)} warning(s)"
-    )
-    return {"verify_report": report, "notes": [note]}
 
 
 def _render_for_verification(resume) -> str:

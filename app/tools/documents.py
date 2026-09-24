@@ -113,15 +113,14 @@ def from_file(path: str | Path) -> Document:
             confidence=1.0,
         )
     if suffix in IMAGE_SUFFIXES:
-        # Images go to the multimodal model rather than a local OCR pipeline;
-        # the extractor node handles this branch.
-        return Document(
-            source_type="image",
-            raw_text="",
-            filename=p.name,
-            extraction_method="deferred-multimodal",
-            confidence=0.7,
-            warnings=["Image input is passed to the multimodal extractor."],
+        # Refused rather than half-supported. There is no image extraction
+        # path: this used to return an empty Document that intake then
+        # rejected as "almost no text". Sending the image to a multimodal model
+        # is possible, but PII redaction cannot touch pixels - a deliberate
+        # decision for later, not a default.
+        raise UnsupportedDocument(
+            f"Image files ({suffix}) are not supported. Upload a PDF or DOCX, "
+            "or paste the text."
         )
     if suffix == ".doc":
         raise UnsupportedDocument(

@@ -1,8 +1,8 @@
 """FastAPI app.
 
 One Python service: the pipeline, the store and the UI. Server-rendered Jinja
-with a small amount of vanilla JS for polling - no build step, no CDN, works
-offline.
+with a small amount of vanilla JS for polling - no build step, no JS
+dependencies. Fonts come from Google Fonts, falling back to system fonts.
 
     ./.venv/bin/uvicorn app.web:app --reload --port 8000
 """
@@ -12,11 +12,13 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
 from app import store
 from app.config import settings
@@ -24,37 +26,62 @@ from app.nodes.rendering import ats_lint
 from app.preflight import missing_credentials
 from app.runner import resolve_and_render, submit
 from app.schemas.match import UNSCORABLE_CATEGORIES
-from app.tools.documents import IMAGE_SUFFIXES, TEXT_SUFFIXES
+from app.tools.documents import TEXT_SUFFIXES
 
 TEMPLATES = Jinja2Templates(directory=str(settings.root / "app" / "templates"))
-UPLOADS = settings.data_dir / "uploads"
-ALLOWED_SUFFIXES = {".pdf", ".docx", *TEXT_SUFFIXES, *IMAGE_SUFFIXES}
-
-app = FastAPI(title="resume-agent")
+UPLOADS = settings.uploads_dir
+ALLOWED_SUFFIXES = {".pdf", ".docx", *TEXT_SUFFIXES}
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     store.init_db()
+    # Anything still in flight was orphaned by the restart - see the docstring.
+    store.fail_interrupted_runs()
     UPLOADS.mkdir(parents=True, exist_ok=True)
+    # With every run now terminal, any upload left behind belongs to a run
+    # that died mid-flight and will never be read.
+    for leftover in UPLOADS.iterdir():
+        if leftover.is_file():
+            leftover.unlink(missing_ok=True)
+    yield
+
+
+app = FastAPI(title="resume-agent", lifespan=lifespan)
+
+
+def _gold_results() -> list[dict]:
+    """Latest recorded gold verdict per case.
+
+    results.jsonl is append-only - every re-run adds a row per case - so it
+    must be reduced to one row per id, later lines winning, exactly as
+    run_gold.py reads it. The sidebar and /system both use this, so they
+    cannot disagree.
+    """
+    results = settings.root / "evals" / ".cache" / "results.jsonl"
+    if not results.exists():
+        return []
+    latest: dict[str, dict] = {}
+    for line in results.read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            latest[row["id"]] = row
+    return [r for r in latest.values() if "error" not in r]
 
 
 def _nav() -> dict:
-    """Sidebar context, on every page.
+    """Sidebar context, on every full page.
 
     The counts are real rather than decorative — the design shows numbers next
     to each section, and showing invented ones would make the chrome lie about
     the system it is reporting on.
     """
     runs = store.list_runs(limit=200)
+    graded = _gold_results()
     eval_score = None
-    results = settings.root / "evals" / ".cache" / "results.jsonl"
-    if results.exists():
-        rows = [json.loads(l) for l in results.read_text().splitlines() if l.strip()]
-        graded = [r for r in rows if "error" not in r]
-        if graded:
-            agree = sum(1 for r in graded if r.get("drift") == 0)
-            eval_score = f"{round(100 * agree / len(graded))}%"
+    if graded:
+        agree = sum(1 for r in graded if r.get("drift") == 0)
+        eval_score = f"{round(100 * agree / len(graded))}%"
 
     return {
         "runs": len(runs),
@@ -67,11 +94,16 @@ def _nav() -> dict:
 
 
 def render(
-    request: Request, name: str, context: dict, status_code: int = 200, page: str = ""
+    request: Request, name: str, context: dict, status_code: int = 200, page: str = "",
+    *, chrome: bool = True,
 ) -> HTMLResponse:
     """Current Starlette wants (request, name, context) — the older
-    (name, context-with-request) form fails with an unhashable-dict TypeError."""
-    context = {**context, "nav": _nav(), "page": page}
+    (name, context-with-request) form fails with an unhashable-dict TypeError.
+
+    chrome=False for polled fragments: they have no sidebar, and _nav() parses
+    every stored profile - not something to do every two seconds per open tab.
+    """
+    context = {**context, "nav": _nav() if chrome else None, "page": page}
     return TEMPLATES.TemplateResponse(request, name, context, status_code=status_code)
 
 
@@ -157,7 +189,15 @@ async def start_run(
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
-def _run_context(run: dict) -> dict:
+def _untraced(run: dict) -> list[dict]:
+    """Claim-trace findings recorded at render time, if any."""
+    path = run["artifacts"].get("untraced_claims")
+    if not path or not Path(path).exists():
+        return []
+    return json.loads(Path(path).read_text(encoding="utf-8")).get("items", [])
+
+
+def _run_context(run: dict, *, unresolved: int = 0) -> dict:
     """Group the scorecard the way the design reads it: gates first (a single
     failure ends the run), then scorable must-haves, then nice-to-haves that
     never move the verdict. The excluded rows are shown but visibly set apart,
@@ -209,8 +249,10 @@ def _run_context(run: dict) -> dict:
         "groups": groups,
         "breakdown": breakdown,
         "lint": lint,
+        "untraced": _untraced(run) if run["status"] == "done" else [],
         "blockers_total": len(blockers),
         "blockers_resolved": sum(1 for f in blockers if f.claim in resolved),
+        "unresolved": unresolved if run["status"] == "needs_review" else 0,
     }
 
 
@@ -219,7 +261,11 @@ def run_page(request: Request, run_id: str):
     run = store.get_run(run_id)
     if not run:
         return HTMLResponse("Run not found", status_code=404)
-    return render(request, "web/run.html", _run_context(run), page="runs")
+    try:
+        unresolved = int(request.query_params.get("unresolved", 0))
+    except ValueError:
+        unresolved = 0
+    return render(request, "web/run.html", _run_context(run, unresolved=unresolved), page="runs")
 
 
 @app.get("/runs/{run_id}/body", response_class=HTMLResponse)
@@ -228,7 +274,7 @@ def run_body(request: Request, run_id: str):
     run = store.get_run(run_id)
     if not run:
         return HTMLResponse("Run not found", status_code=404)
-    return render(request, "web/_run_body.html", _run_context(run))
+    return render(request, "web/_run_body.html", _run_context(run), chrome=False)
 
 
 @app.post("/runs/{run_id}/review")
@@ -249,7 +295,9 @@ async def submit_review(request: Request, run_id: str):
         return RedirectResponse(f"/runs/{run_id}?unresolved={len(outstanding)}", status_code=303)
 
     store.update_run(run_id, status="running", stage="Rendering")
-    resolve_and_render(run_id, accepted)
+    # Synchronous render (WeasyPrint can take seconds) must not run on the
+    # event loop, or every other request waits behind it.
+    await run_in_threadpool(resolve_and_render, run_id, accepted)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
@@ -328,16 +376,7 @@ def system_page(request: Request):
         ("tailor", "select facts, write the resume", settings.model_tailor),
         ("verify", "adversarial fact-check", settings.model_verify),
     ]
-    results = settings.root / "evals" / ".cache" / "results.jsonl"
-    gold: list[dict] = []
-    if results.exists():
-        seen: dict[str, dict] = {}
-        for line in results.read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                seen[row["id"]] = row
-        gold = list(seen.values())
-    graded = [r for r in gold if "error" not in r]
+    graded = _gold_results()
     summary = {
         "total": len(graded),
         "agree": sum(1 for r in graded if r.get("drift") == 0),

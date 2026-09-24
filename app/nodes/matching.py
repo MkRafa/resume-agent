@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.models import complete_json
 from app.schemas import Gap, Scorecard, ScorecardRow, ScorecardRows
+from app.schemas.match import UNSCORABLE_CATEGORIES
 from app.skills import load
 from app.state import PipelineState
 from app.tools import compute_verdict
@@ -107,12 +108,32 @@ def _fill_missing_rows(scorecard: Scorecard, job) -> None:
     scorecard.rows = [r for r in scorecard.rows if r.requirement_id in valid]
 
 
+def _is_weak(row: ScorecardRow, job) -> bool:
+    """A row the gap report must explain.
+
+    'unknown' counts when the requirement is scorable: compute_verdict treats
+    it as absent evidence there, so it can sink the verdict - and a gap that
+    sinks the verdict without being explained is the worst kind. On an
+    unscorable requirement (work authorization, location) 'unknown' is an open
+    question for the candidate, not a gap.
+    """
+    if row.grade in {"none", "transferable"}:
+        return True
+    req = job.by_id(row.requirement_id)
+    return (
+        row.grade == "unknown"
+        and req is not None
+        and req.kind in {"gate", "must"}
+        and req.category not in UNSCORABLE_CATEGORIES
+    )
+
+
 def gap_report(state: PipelineState) -> dict:
     """Explain the gaps and, on a hard no, name roles this profile would fit."""
     graph, job, scorecard = state["graph"], state["job"], state["scorecard"]
     assert graph is not None and job is not None and scorecard is not None
 
-    weak = [r for r in scorecard.rows if r.grade in {"none", "transferable"}]
+    weak = [r for r in scorecard.rows if _is_weak(r, job)]
     if not weak:
         return {}
 

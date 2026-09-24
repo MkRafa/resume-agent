@@ -10,7 +10,7 @@ built. Grader calibration against the gold set is the open work — see
 
 - [Architecture](#architecture) — the full end-to-end map
 - [Web app](#web-app) · [Setup](#setup) · [Evaluation](#evaluation)
-- [Gotchas already paid for](#gotchas-already-paid-for) — nine bugs, and why they happened
+- [Gotchas already paid for](#gotchas-already-paid-for) — the bugs, and why they happened
 
 ## Web app
 
@@ -19,15 +19,16 @@ cd resume-agent && ./.venv/bin/uvicorn app.web:app --reload --port 8000
 ```
 
 One Python service — pipeline, store and UI. Server-rendered Jinja with vanilla
-JS polling: no build step, no CDN, works offline.
+JS polling: no build step, no JS dependencies. The only external request is
+Google Fonts; offline, the UI falls back to system fonts.
 
-- **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD, image)
+- **`/`** — paste or upload a profile and a JD (PDF, DOCX, TXT, MD)
 - **`/runs/{id}`** — live progress, then the evidence scorecard, verdict, open
   questions, gaps and adjacent roles
 - **the review gate** — when the verifier can't trace a claim, the resume is
   withheld until a human ticks each one. Unticked blockers keep it blocked.
-- **`/profiles/{key}`** — the accumulated career graph and every application made
-  against it
+- **`/profiles/{key}`** — the candidate's latest career graph and every
+  application made against it
 
 Runs execute in a worker thread (30–60s, ~7 model calls) with status persisted
 to SQLite, so a page refresh or a second browser sees the same state.
@@ -136,7 +137,7 @@ ways that look entirely plausible.
 | Orchestration | **LangGraph** | Typed state, explicit conditional edges, and — the reason it earns its place — checkpointing for the human review interrupt |
 | Contracts | **Pydantic v2** | Schema at every node boundary; validation failures drive the model retry |
 | Model routing | **LiteLLM** | One call path across Gemini / Groq / Ollama; swap providers by config, not code |
-| Web | **FastAPI + Jinja** | One Python service. Vanilla JS polling — no build step, no CDN, works offline |
+| Web | **FastAPI + Jinja** | One Python service. Vanilla JS polling — no build step, no JS dependencies |
 | Store | **SQLite (WAL)** | Postgres-shaped schema; the worker thread and request thread both write |
 | Eval | **pytest + JSONL** | Free, no vendor. `run_gold.py` adds a confusion matrix |
 
@@ -193,9 +194,9 @@ generated.** All unit-tested.
 
 | Module | Functions | Notes |
 |---|---|---|
-| `identity.py` | `normalize_email`, `normalize_phone`, `resolve_identity`, `merge_identities`, `lookup_keys` | Email primary, phone fallback. **Both retained as alternate keys** so a later upload with only one reconciles instead of forking a second profile. Gmail dots deliberately *not* canonicalised — wrongly merging two people is worse than failing to merge one |
+| `identity.py` | `normalize_email`, `normalize_phone`, `resolve_identity`, `merge_identities` | Email primary, phone fallback. **Both retained as alternate keys** so a later upload with only one reconciles instead of forking a second profile. Gmail dots deliberately *not* canonicalised — wrongly merging two people is worse than failing to merge one |
 | `dates.py` | `parse_month`, `years_of_experience`, `graph_years_of_experience` | Overlapping roles are **merged, not summed** — two concurrent jobs are 5 years, not 10. LLMs get this wrong plausibly |
-| `documents.py` | `from_text`, `from_file`, `load_input` | PDF/DOCX/TXT/MD/image → one `Document`. Detects a scanned PDF (empty text layer) instead of silently extracting 40 characters. Reads DOCX **tables** — resumes hide whole roles there |
+| `documents.py` | `from_text`, `from_file`, `load_input` | PDF/DOCX/TXT/MD → one `Document`. Images are refused with a reason (no extraction path, and redaction cannot touch pixels). Detects a scanned PDF (empty text layer) instead of silently extracting 40 characters. Reads DOCX **tables** — resumes hide whole roles there |
 | `keywords.py` | `keyword_coverage`, `resume_to_text` | Word-bounded matching ("Go" must not hit "Django"). Stuffing needs high density **and** ≥4 repetitions **and** a document long enough for density to mean anything |
 | `verdict.py` | `compute_verdict`, `strongest_hooks` | The rule: any failed gate → `not_matching`; >2 absent musts → `not_matching`; ≥80% coverage with none absent → `strong`; ≥50% → `partial`. Boilerplate and unscorable categories leave the denominator |
 
@@ -206,11 +207,11 @@ the call path in `models.py` stays readable end to end.
 
 | Hook | When | What it does |
 |---|---|---|
-| `pii.redact` / `restore` | before / after every call | Swaps names, emails, phones, URLs for placeholders. The model doesn't need real PII to grade evidence. Mitigation, **not** a compliance story — employment history is itself identifying |
+| `pii.redact` / `restore` | before / after every call | Swaps emails, phones and URLs for placeholders — including on the schema-retry path. Names can't be pattern-matched, so they are kept out of every prompt after extraction instead. Mitigation, **not** a compliance story — employment history is itself identifying |
 | `models.validate_or_retry` | after every call | Pydantic parse; on failure, feeds the validation error back and retries once |
 | `cost.log_cost` | after every call | Per-node token ledger. You want this before the first bill, not after |
 | `guardrail.block_on_unresolved_flags` | before `render` | **Hard gate.** Raises `RenderBlocked` while any verifier blocker is unresolved. Structural, not a policy someone remembers |
-| `audit.write_audit_log` | after `render` | Persists every bullet → `fact_id` edge to `provenance.json`, flagging orphans |
+| `audit.write_audit_log` | after `render` | Persists every cited claim → `fact_id` edge (summary, experience, projects) to `provenance.json`, flagging orphans |
 
 ### Agents
 
@@ -221,8 +222,9 @@ nodes "agents" would be marketing. Two components are agent-*shaped*:
 - **The verifier** — runs on a different model family, in a deliberately starved
   context (no JD), with an adversarial instruction. Isolation is a correctness
   mechanism, not an implementation detail.
-- **The document extractor** — a fallback ladder (text layer → multimodal →
-  ask the user to paste) rather than a single path.
+- **The document extractor** — a fallback ladder (text layer → ask the user
+  to paste) rather than a single path. A multimodal rung for images and scans
+  is designed but not built: it would send unredacted pixels to the provider.
 
 The one genuinely agentic component in the *design* is the **enrichment
 interviewer** (M2, not built): it decides which scorecard gaps are worth asking
@@ -235,16 +237,21 @@ stops on its own. It needs a hard turn cap or it will interview people forever.
 which is where the hooks hang.
 
 ```
-extract   gemini-3.7-flash    native PDF/image, cheap, structured output
-parse     gemini-3.7-flash    low judgement
-match     gemini-3.7-flash    highest-judgement node — first to upgrade on a paid key
-tailor    gemini-3.7-flash    user-visible quality
-verify    groq/llama-3.3-70b  DIFFERENT FAMILY, deliberately
+extract   gemini-3.5-flash    cheap, structured output
+parse     gemini-3.5-flash    low judgement
+match     gemini-3.5-flash    highest-judgement node — first to upgrade on a paid key
+tailor    gemini-3.5-flash    user-visible quality
+verify    groq/gpt-oss-120b   DIFFERENT FAMILY, deliberately
 ```
 
 Prompt layout is deliberate: `[system][career graph ← stable][JD ← varies]`.
 The graph is identical across every application one candidate makes, so keeping
 it first and unchanged makes it the cacheable prefix.
+
+**The verifier has its own, opt-in failover.** `MODEL_VERIFY_FALLBACKS` is
+empty by default; anything in it from the tailorer's family is dropped. The
+reverse is enforced too: the tailorer's fallbacks skip the verifier's family,
+so a rate-limited Gemini can never hand the writing to the model that checks it.
 
 **Failover rotates models before sleeping.** Free-tier quotas are *per model*
 ("limit: 20, model: gemini-3.7-flash"), so when one is exhausted a sibling is
@@ -280,8 +287,13 @@ the audit log possible.
 
 - `profiles` keyed by the identity rule; `profile_keys` maps every alternate key
   to one profile, so the data model is **multi-tenant before there is any login**
-- `runs` holds the full state (job, scorecard, resume, verify report, artifacts)
-  so a refresh or a second browser sees the same thing
+- `runs` holds the full state (career graph snapshot, job, scorecard, resume,
+  verify report, artifacts) so a refresh or a second browser sees the same thing
+- a profile holds the **latest** extraction — each run replaces it, and atom
+  ids are reassigned every time. That is why each run keeps its own graph
+  snapshot: a review approved later still renders against the facts that
+  resume was written from. Merging extractions into one growing graph is M2
+  work (it needs atom de-duplication and stable ids)
 - `applications` is **deliberately unused** — outcome data ("did this get a
   reply?") is what tells you whether your verdicts are honest, and it cannot be
   backfilled
@@ -292,6 +304,12 @@ for polling. `resolve_and_render` handles the second half of the human review:
 it calls the render node **directly** rather than re-invoking the graph, because
 a fresh run would generate a *different* resume whose claims no longer match the
 ones just accepted.
+
+A restart orphans in-flight runs (the pool is in-process, and `--reload`
+restarts on every save), so startup marks any `queued`/`running` run as
+`failed · Interrupted` rather than leaving it spinning. Uploaded files are
+deleted as soon as their run has read them — the extracted graph is what is
+kept, and an uploaded resume is raw PII.
 
 ### Repository layout
 
@@ -312,7 +330,7 @@ app/
   runner.py        background execution + status
   web.py           FastAPI routes
 evals/
-  test_*.py        84 tests, no API calls
+  test_*.py        unit, plumbing, store and web tests — no API calls
   run_gold.py      gold-set runner + confusion matrix
   gold/            22 labelled pairs, 8 profiles × 13 JDs (synthetic)
 cli.py             the M0 entry point
@@ -325,14 +343,14 @@ Five layers, cheapest first. Layers 1 and 5 run with **no API calls at all**.
 
 | Layer | What it checks | Cost | Where |
 |---|---|---|---|
-| 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker | free | `test_identity/dates/keywords/verdict/quota.py` |
-| 2. Plumbing | Fan-out, join, routing, render guardrail, provenance — models stubbed | free | `test_pipeline.py` |
+| 1. Unit | Identity resolution, date math, keyword coverage, the verdict rule, the quota tracker, model routing, PII redaction, eval cache keys | free | `test_identity/dates/keywords/verdict/quota/config/pii/gold_cache.py` |
+| 2. Plumbing | Fan-out, join, routing, render guardrail, provenance, intake errors, the store, the web review gate — models stubbed | free | `test_pipeline/documents/store/web/models.py` |
 | 3. **Verdict agreement** | Does the grader match human labels? **The eval that matters** | ~43 calls cold | `run_gold.py`, `test_gold.py` |
 | 4. **Verifier calibration** | Does the fact-checker catch fabrication without blocking truth? | 22 calls | `run_verifier.py` |
 | 5. **Hallucination rate** | Can every claim on a generated resume be traced? | free | `app/tools/claim_trace.py` |
 
 ```bash
-./.venv/bin/python -m pytest evals/ -q        # 84 tests, no API calls
+./.venv/bin/python -m pytest evals/ -q        # no API calls; gold tests skip
 ```
 
 ### Verifier eval
@@ -350,7 +368,24 @@ accuracy figure, because they cost very different things:
 - a **false positive** blocks a truthful resume, and teaches the reviewer to
   tick every box without reading — silently turning the gate into a rubber stamp
 
-**Baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
+**Current baseline (`gpt-oss-120b` on Groq, 2026-09-24, all 22 live):**
+
+```
+Misses            0 / 11     fabrication that would ship on a real resume
+False positives   1 / 11     truthful resumes blocked
+Exactly correct  17 / 22     right call AND right severity
+```
+
+The verifier moved to `gpt-oss-120b` because Groq retired
+`llama-3.3-70b-versatile` — every run failed at the verify step. Still zero
+misses. The one false positive, `clean_merged_atoms`, is arguably a **labelling
+error, not a model error**: the fixture bullet says "authoring *its*
+runbooks" (the route-optimisation API's), while the source atom says the
+runbooks were for the shipment and billing services. The model flagged exactly
+that misattribution. Llama let it through. The fixture needs a decision —
+rewrite the bullet into a faithful merge, or relabel it `flag`.
+
+**Previous baseline (`llama-3.3-70b`, 2026-08-15, all 22 verified live):**
 
 ```
 Misses            0 / 11     fabrication that would ship on a real resume
@@ -374,6 +409,8 @@ escalates one — so a real fabrication cannot be filtered away.
 
 The cache key includes the prompt text and the model id. Without that, editing
 `verify.md` replays stale output and reports the old behaviour as the new one.
+The cache holds the model's **raw** output; `verify_filter.py` is applied at
+scoring time, so a filter change shows up immediately, `--offline` included.
 
 ### Claim tracing (layer 5)
 
@@ -384,10 +421,19 @@ through. These are arithmetic and set-membership checks:
 
 | Check | Catches |
 |---|---|
-| `orphan_bullet` | a bullet citing no facts at all |
+| `orphan_bullet` | a bullet (or the summary) citing no facts at all |
 | `dangling_citation` | a `fact_id` that does not exist |
 | `unsourced_number` | a figure absent from the cited atoms and not derivable from them |
 | `unsourced_technology` | a named tool absent from the cited atoms |
+| `unsourced_header` | a role title, company or date range no cited atom carries — title inflation |
+| `overstated_skill` | a skill the candidate qualified ("Go (basic)") and nothing demonstrates, listed bare or leading the skills line |
+
+Every section is traced: experience and project bullets against their own
+citations, the summary against `summary_fact_ids` (it may state the computed
+years figure), and the uncited skills list and education lines against the
+whole graph. Tool names that are also English words (`Go`, `Spark`, `Chef`…)
+only count when written as a proper noun, so "go-to-market" is not an invented
+language.
 
 Numbers are the highest-signal check: a fabricated metric is the most damaging
 and most checkable thing a resume can contain. Percentages derived from stated
@@ -400,7 +446,10 @@ alongside the resume when anything fails to trace.
 
 **Measured (2026-08-15): 27 bullets across 3 generated resumes, 0 untraceable.**
 A clean result, but a small sample on synthetic profiles — the number to watch
-as the corpus grows, not yet evidence of a solved problem.
+as the corpus grows, not yet evidence of a solved problem. It was also measured
+over bullets only: re-tracing the one stored web run with the full-coverage
+check found its bullets clean but its **skills list** leading with `Go` and
+`Postgres`, neither of which its (truncated, 3-atom) career graph contains.
 
 ### The gold set
 
@@ -424,8 +473,11 @@ Three things keep this affordable on a free tier:
 1. **It stops at the verdict** — 3 calls per case, not 7. Tailoring and
    verification are a separate concern with their own eval.
 2. **Extractions and JD parses are cached by content hash**, so 8 profiles
-   across 22 cases costs 8 extractions, not 22. Cache invalidates when a
-   fixture changes.
+   across 22 cases costs 8 extractions, not 22. Every key includes the fixture,
+   the prompt that produced it and the model id, and scorecard rows are keyed
+   on the extracted graph and parsed job — so editing any prompt or switching
+   `MODEL_*` invalidates exactly what it affects instead of replaying stale
+   output as if it were new.
 3. **Scorecard rows are cached separately from the verdict.** The verdict is
    deterministic Python over those rows, so every change to a threshold, to
    gate handling, or to the unknown/unscorable logic re-scores the whole set
@@ -523,14 +575,32 @@ Fixtures are synthetic — never commit a real person's resume.
 - **Node modules must not share a name with the function they export.**
   `match.py` exporting `match` gets shadowed in `app/nodes/__init__.py`, making
   it unpatchable in tests. Hence `matching.py` / `rendering.py`.
+- **Redaction must survive the retry path.** The schema retry appended the
+  model's output *after* placeholders were restored, so the second request
+  carried the real email and phone. Anything derived from restored text that
+  goes back to a provider must be re-redacted.
+- **Failover can quietly undo cross-family verification.** Guarding the
+  verifier against Gemini fallbacks is half of it: with the verifier's own
+  model in `MODEL_FALLBACKS`, a rate-limited Gemini handed the *writing* to
+  the model that then checked it. Independence has to be enforced in both
+  directions, by family, not by exact id.
+- **A cache key must include what produced the output.** Keying eval caches
+  on the fixture alone replays the previous prompt's output as the new
+  prompt's result — and caching *after* a deterministic filter hides every
+  later change to that filter.
+- **`.gitignore` cannot re-include a file inside an ignored directory.**
+  `data/` with `!data/profiles/sample_*` silently shipped no samples; it has to
+  be `data/*` and a negation per level.
 - **Don't route to `END` per-branch before a join.** The healthy branch still
   triggers the join node, which then reads a key the failed branch never wrote.
   The abort check belongs at the join.
 
 ## Privacy
 
-Resumes are dense PII. `REDACT_PII=true` swaps names, emails, phones and URLs
-for placeholders before every model call and restores them after — but
+Resumes are dense PII. `REDACT_PII=true` swaps emails, phones and URLs for
+placeholders before every model call and restores them after, retries
+included. Names cannot be pattern-matched, so the extractor necessarily sees
+the name in the source document; no prompt after that includes it. But
 employment history is itself identifying, and **free provider tiers generally
 train on inputs**. Fine for synthetic data and your own resume; not acceptable
 once real users upload theirs. Move to a no-training tier before M1 launches.
@@ -540,9 +610,9 @@ For fully local extraction, point `MODEL_EXTRACT` at an Ollama model.
 
 **Calibration — the baseline exists now (82%, 0 over-generous).** Next: grow
 the gold set toward ~30 pairs weighted to `partial_match` (3 of the 4 remaining
-errors involve it), then build the two missing eval layers — hallucination rate,
-and verifier should-flag/shouldn't-flag pairs. The verifier has been tuned twice
-by reading single outputs, which is the thing evals exist to stop.
+errors involve it). The verifier eval (22 pairs) and claim tracing now exist
+too — grow the verifier set alongside, since 22 cases at 0/0 is a floor, not
+proof.
 
 **Then, in rough order:**
 
@@ -567,8 +637,13 @@ by reading single outputs, which is the thing evals exist to stop.
 - **Grader calibration: 82% agreement, 0 over-generous** (22 cases,
   `gemini-3.5-flash`, 2026-08-15). Good enough to build on; not yet good enough
   to trust unsupervised. See the confusion matrix above.
-- **Verifier over-flags.** It catches real problems and still flags accurate
-  specific→general naming. No eval yet.
+- **Verifier: 0/11 misses, 1/11 false positives** on 22 hand-built pairs
+  (`gpt-oss-120b`; the one FP is arguably a mislabelled fixture), with two
+  false-positive classes enforced in Python rather than the prompt. A small
+  set — see [Verifier eval](#verifier-eval).
+- **Images and scanned PDFs are not read.** Images are refused; a scan is
+  detected and the user asked to paste text. A multimodal rung would send
+  unredacted pixels to the provider, so it is a decision, not a default.
 - **Free tier is the binding constraint** — Gemini allows 20 requests/day/model
   and one match is ~7 calls, so ~3 runs/day. Pro models 429 immediately, which
   is why `match` runs on Flash despite being the highest-judgement node.
