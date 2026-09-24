@@ -389,10 +389,18 @@ through. These are arithmetic and set-membership checks:
 
 | Check | Catches |
 |---|---|
-| `orphan_bullet` | a bullet citing no facts at all |
+| `orphan_bullet` | a bullet (or the summary) citing no facts at all |
 | `dangling_citation` | a `fact_id` that does not exist |
 | `unsourced_number` | a figure absent from the cited atoms and not derivable from them |
 | `unsourced_technology` | a named tool absent from the cited atoms |
+| `unsourced_header` | a role title, company or date range no cited atom carries — title inflation |
+
+Every section is traced: experience and project bullets against their own
+citations, the summary against `summary_fact_ids` (it may state the computed
+years figure), and the uncited skills list and education lines against the
+whole graph. Tool names that are also English words (`Go`, `Spark`, `Chef`…)
+only count when written as a proper noun, so "go-to-market" is not an invented
+language.
 
 Numbers are the highest-signal check: a fabricated metric is the most damaging
 and most checkable thing a resume can contain. Percentages derived from stated
@@ -405,7 +413,10 @@ alongside the resume when anything fails to trace.
 
 **Measured (2026-08-15): 27 bullets across 3 generated resumes, 0 untraceable.**
 A clean result, but a small sample on synthetic profiles — the number to watch
-as the corpus grows, not yet evidence of a solved problem.
+as the corpus grows, not yet evidence of a solved problem. It was also measured
+over bullets only: re-tracing the one stored web run with the full-coverage
+check found its bullets clean but its **skills list** leading with `Go` and
+`Postgres`, neither of which its (truncated, 3-atom) career graph contains.
 
 ### The gold set
 

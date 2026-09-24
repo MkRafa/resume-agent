@@ -14,20 +14,29 @@ from app.schemas import CareerGraph, TailoredResume
 
 
 def audit_provenance(resume: TailoredResume, graph: CareerGraph) -> list[dict]:
-    """Build bullet -> fact edges, marking any bullet with no traceable source."""
-    edges: list[dict] = []
+    """Build claim -> fact edges for every cited section - summary, experience
+    and projects - marking any with no traceable source."""
+    cited: list[tuple[str, str, list[str]]] = []
+    if resume.summary:
+        cited.append(("summary", resume.summary, resume.summary_fact_ids))
     for block in resume.experience:
         for i, bullet in enumerate(block.bullets):
-            known = [fid for fid in bullet.fact_ids if graph.by_id(fid)]
-            edges.append(
-                {
-                    "location": f"{block.company}/{block.role}#{i}",
-                    "text": bullet.text,
-                    "fact_ids": bullet.fact_ids,
-                    "resolved_fact_ids": known,
-                    "orphan": not known,
-                }
-            )
+            cited.append((f"{block.company}/{block.role}#{i}", bullet.text, bullet.fact_ids))
+    for j, bullet in enumerate(resume.projects):
+        cited.append((f"projects#{j}", bullet.text, bullet.fact_ids))
+
+    edges: list[dict] = []
+    for location, text, fact_ids in cited:
+        known = [fid for fid in fact_ids if graph.by_id(fid)]
+        edges.append(
+            {
+                "location": location,
+                "text": text,
+                "fact_ids": fact_ids,
+                "resolved_fact_ids": known,
+                "orphan": not known,
+            }
+        )
     return edges
 
 
