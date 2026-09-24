@@ -175,6 +175,15 @@
   <h2>Review gate</h2>
   <span class="note">{{ blockers_resolved }} of {{ blockers_total }} blockers resolved</span>
 </div>
+{% if unresolved %}
+<div class="banner banner-error">
+  <span class="eyebrow">Still blocked</span>
+  <div>
+    {{ unresolved }} blocker{{ "" if unresolved == 1 else "s" }} still unticked, so the resume
+    was not generated. Your ticks are saved — tick the rest only if they are true.
+  </div>
+</div>
+{% endif %}
 <div class="card">
   <div class="card-pad" style="border-bottom:1px solid var(--line)">
     <p class="small muted" style="margin:0">
@@ -187,7 +196,8 @@
     {% for flag in run.verify.flags %}
       <label class="flag" style="cursor:{{ 'pointer' if flag.severity == 'blocker' else 'default' }}">
         {% if flag.severity == "blocker" %}
-          <input type="checkbox" name="accept" value="{{ flag.claim }}" style="margin-top:2px; flex:none">
+          <input type="checkbox" name="accept" value="{{ flag.claim }}" style="margin-top:2px; flex:none"
+                 {% if flag.claim in run.resolved %}checked{% endif %}>
         {% else %}
           <span class="chip g-adjacent" style="flex:none">warning</span>
         {% endif %}
@@ -222,7 +232,7 @@
   <h2>Tailored resume</h2>
   <span class="note">
     {{ run.resume.all_bullets() | length }} bullets ·
-    {{ run.resume.all_bullets() | rejectattr("fact_ids") | list | length }} untraceable
+    {{ untraced | length }} untraced claim{{ "" if untraced | length == 1 else "s" }}
   </span>
 </div>
 <div class="card card-pad">
@@ -236,9 +246,33 @@
 </div>
 
 {% if run.resume %}
+{% if untraced %}
+<div class="section-head">
+  <h2>Untraced claims</h2>
+  <span class="note">deterministic claim trace — numbers, tools and titles no cited fact supports</span>
+</div>
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:110px">Where</th><th style="width:170px">Check</th><th>Claim</th></tr></thead>
+      <tbody>
+      {% for u in untraced %}
+      <tr>
+        <td class="mono tiny muted">{{ u.section or "bullet" }}<div>{{ u.location }}</div></td>
+        <td><span class="chip g-none">{{ u.kind.replace("_", " ") }}</span>
+          <div class="mono tiny" style="margin-top:4px">{{ u.token }}</div></td>
+        <td class="small">{{ u.text }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="section-head">
   <h2>Provenance</h2>
-  <span class="note">nothing appears that isn't traceable to an atom</span>
+  <span class="note">every bullet and the atoms it cites</span>
 </div>
 <div class="card">
   <div class="table-wrap">
