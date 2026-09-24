@@ -44,6 +44,8 @@ class Settings:
     root: Path = ROOT
     data_dir: Path = ROOT / "data"
     out_dir: Path = ROOT / "data" / "out"
+    # Web uploads. Transient: deleted once their run has read them.
+    uploads_dir: Path = ROOT / "data" / "uploads"
 
     # Comma-separated fallback chain per node. Free tiers shed load constantly,
     # so a second option is the difference between a run finishing and a run

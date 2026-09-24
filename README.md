@@ -299,6 +299,12 @@ it calls the render node **directly** rather than re-invoking the graph, because
 a fresh run would generate a *different* resume whose claims no longer match the
 ones just accepted.
 
+A restart orphans in-flight runs (the pool is in-process, and `--reload`
+restarts on every save), so startup marks any `queued`/`running` run as
+`failed · Interrupted` rather than leaving it spinning. Uploaded files are
+deleted as soon as their run has read them — the extracted graph is what is
+kept, and an uploaded resume is raw PII.
+
 ### Repository layout
 
 ```

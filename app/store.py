@@ -251,6 +251,27 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     return run
 
 
+def fail_interrupted_runs() -> int:
+    """Mark runs a restart orphaned as failed. Call once, at process start.
+
+    Runs execute in an in-process thread pool, so a run still `queued` or
+    `running` when the process starts has no worker and never will - without
+    this it shows a spinner forever. `uvicorn --reload` restarts on every save,
+    so this is routine in development, not an edge case.
+
+    Assumes one process owns the store (true of the thread-pool design). With
+    several workers, one starting up would fail another's live runs.
+    """
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE runs SET status = 'failed', stage = 'Interrupted', "
+            "error = 'The server restarted while this run was in progress. Start it again.', "
+            "updated_at = ? WHERE status IN ('queued', 'running')",
+            (_now(),),
+        )
+        return cur.rowcount
+
+
 def list_runs(profile_key: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
     query = (
         "SELECT id, profile_key, status, jd_title, jd_company, verdict, created_at "

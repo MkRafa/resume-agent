@@ -102,3 +102,54 @@ def test_init_db_migrates_a_pre_snapshot_database(db):
     store.init_db()
     run_id = store.create_run()
     assert store.get_run(run_id)["graph"] is None  # legacy runs fall back to the profile
+
+
+def test_restart_fails_orphaned_runs(db):
+    """Regression: runs live in an in-process thread pool, so after a restart
+    (every save under `uvicorn --reload`) a queued/running run had no worker
+    and spun forever."""
+    queued, running, done = store.create_run(), store.create_run(), store.create_run()
+    store.update_run(running, status="running")
+    store.update_run(done, status="done")
+
+    assert store.fail_interrupted_runs() == 2
+    assert store.get_run(queued)["status"] == store.get_run(running)["status"] == "failed"
+    assert store.get_run(running)["stage"] == "Interrupted"
+    assert store.get_run(done)["status"] == "done"
+
+
+def test_uploads_are_discarded_but_other_files_never_are(db, monkeypatch):
+    from app.config import settings
+
+    uploads = db / "uploads"
+    uploads.mkdir()
+    monkeypatch.setattr(settings, "uploads_dir", uploads)
+    upload = uploads / "abc123.pdf"
+    upload.write_text("resume")
+    own_file = db / "my_resume.pdf"  # e.g. passed to the CLI
+    own_file.write_text("resume")
+
+    runner.discard_uploads(str(upload), str(own_file), None)
+    assert not upload.exists()
+    assert own_file.exists()
+
+
+def test_web_startup_recovers_runs_and_clears_orphaned_uploads(db, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import web
+    from app.config import settings
+
+    uploads = db / "uploads"
+    uploads.mkdir()
+    (uploads / "orphan.pdf").write_text("resume from a run that died")
+    monkeypatch.setattr(settings, "uploads_dir", uploads)
+    monkeypatch.setattr(web, "UPLOADS", uploads)
+    stuck = store.create_run()
+    store.update_run(stuck, status="running")
+
+    with TestClient(web.app) as client:
+        assert client.get(f"/runs/{stuck}").status_code == 200
+
+    assert store.get_run(stuck)["status"] == "failed"
+    assert not any(uploads.iterdir())

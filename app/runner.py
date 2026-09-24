@@ -79,6 +79,23 @@ def _out_dir(run_id: str) -> Path:
     return settings.out_dir / run_id
 
 
+def discard_uploads(*paths: str | None) -> None:
+    """Delete uploaded source documents once a run has read them.
+
+    An uploaded resume is raw PII, and nothing after intake reads it again: the
+    extracted graph is stored, and the review gate re-renders from that. Only
+    files inside the uploads directory are touched, so a CLI user's own files
+    are never deleted.
+    """
+    uploads = settings.uploads_dir.resolve()
+    for raw in paths:
+        if not raw:
+            continue
+        path = Path(raw).resolve()
+        if path.parent == uploads:
+            path.unlink(missing_ok=True)
+
+
 def _classify(exc: Exception) -> tuple[str, str, str]:
     """(stage, headline, detail) for a failed run.
 
@@ -122,6 +139,13 @@ def _classify(exc: Exception) -> tuple[str, str, str]:
 
 
 def _execute(run_id: str, **kwargs) -> None:
+    try:
+        _run_pipeline(run_id, **kwargs)
+    finally:
+        discard_uploads(kwargs["profile_file"], kwargs["jd_file"])
+
+
+def _run_pipeline(run_id: str, **kwargs) -> None:
     store.update_run(run_id, status="running", stage="Reading documents")
     try:
         state = new_state(

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request, UploadFile
@@ -27,16 +28,25 @@ from app.schemas.match import UNSCORABLE_CATEGORIES
 from app.tools.documents import TEXT_SUFFIXES
 
 TEMPLATES = Jinja2Templates(directory=str(settings.root / "app" / "templates"))
-UPLOADS = settings.data_dir / "uploads"
+UPLOADS = settings.uploads_dir
 ALLOWED_SUFFIXES = {".pdf", ".docx", *TEXT_SUFFIXES}
 
-app = FastAPI(title="resume-agent")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     store.init_db()
+    # Anything still in flight was orphaned by the restart - see the docstring.
+    store.fail_interrupted_runs()
     UPLOADS.mkdir(parents=True, exist_ok=True)
+    # With every run now terminal, any upload left behind belongs to a run
+    # that died mid-flight and will never be read.
+    for leftover in UPLOADS.iterdir():
+        if leftover.is_file():
+            leftover.unlink(missing_ok=True)
+    yield
+
+
+app = FastAPI(title="resume-agent", lifespan=lifespan)
 
 
 def _nav() -> dict:
