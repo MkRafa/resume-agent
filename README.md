@@ -426,6 +426,7 @@ through. These are arithmetic and set-membership checks:
 | `unsourced_number` | a figure absent from the cited atoms and not derivable from them |
 | `unsourced_technology` | a named tool absent from the cited atoms |
 | `unsourced_header` | a role title, company or date range no cited atom carries — title inflation |
+| `overstated_skill` | a skill the candidate qualified ("Go (basic)") and nothing demonstrates, listed bare or leading the skills line |
 
 Every section is traced: experience and project bullets against their own
 citations, the summary against `summary_fact_ids` (it may state the computed

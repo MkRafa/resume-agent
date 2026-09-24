@@ -246,3 +246,47 @@ def test_summarise_counts_other_sections_separately():
     )
     s = summarise(trace_claims(r, g), r)
     assert s["clean_rate"] == 1.0 and s["other_sections_affected"] == ["summary"]
+
+
+# --- Qualified skills ------------------------------------------------------
+# Regression from a live run: the candidate listed "Go (basic)", nothing on
+# their resume demonstrates Go, and the tailored skills line opened with a bare
+# "Go" - the exact oversell tailor.md forbids. Go is in the graph, so the
+# sourcing check passed it, and the verifier did not flag it either.
+
+SKILLS_ATOM = atom("Python, Go (basic), FastAPI, Postgres, familiar with Terraform",
+                   id="f_010", type="skill")
+WORK_ATOM = atom("Built the route API in Python/FastAPI.", id="f_001")
+
+
+def test_unqualified_basic_skill_is_flagged():
+    r = TailoredResume(skills=["Go", "Kafka", "Python"])
+    problems = trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))
+    assert [(p.kind, p.token) for p in problems if p.kind == "overstated_skill"] == [
+        ("overstated_skill", "Go (candidate: basic)")
+    ]
+
+
+def test_qualified_skill_listed_honestly_and_last_is_fine():
+    r = TailoredResume(skills=["Python", "FastAPI", "Go (basic)", "Terraform (familiar)"])
+    assert trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM)) == []
+
+
+def test_qualified_skill_may_not_lead_even_with_its_qualifier():
+    r = TailoredResume(skills=["Go (basic)", "Python"])
+    assert [p.token for p in trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))] == ["Go leads the list"]
+
+
+def test_qualifier_before_the_skill_counts_too():
+    r = TailoredResume(skills=["Python", "Terraform"])
+    assert [p.token for p in trace_claims(r, graph(WORK_ATOM, SKILLS_ATOM))] == [
+        "Terraform (candidate: familiar with)"
+    ]
+
+
+def test_demonstrated_skill_is_not_held_to_its_qualifier():
+    """If an achievement shows the skill in use, the modest self-rating in the
+    skills list does not bind the resume."""
+    shipped = atom("Rewrote the ledger service in Go, cutting p99 by half.", id="f_002")
+    r = TailoredResume(skills=["Go", "Python"])
+    assert trace_claims(r, graph(WORK_ATOM, shipped, SKILLS_ATOM)) == []

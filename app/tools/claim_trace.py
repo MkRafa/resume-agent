@@ -18,6 +18,9 @@ fabricated metric in the summary or a project is just as damaging:
   unsourced_header     a role title, company or date range under Experience
                        that none of the block's cited atoms carry - title
                        inflation ("Senior" -> "Staff") lives here
+  overstated_skill     a skill the candidate qualified ("Go (basic)",
+                       "familiar with Terraform") and nothing demonstrates,
+                       listed without its qualifier or leading the list
 
 Sections: experience and project bullets against their own citations; the
 summary against `summary_fact_ids`; the skills list and education lines
@@ -43,6 +46,7 @@ UntracedKind = Literal[
     "unsourced_number",
     "unsourced_technology",
     "unsourced_header",
+    "overstated_skill",
 ]
 Section = Literal["bullet", "summary", "skills", "education", "header"]
 
@@ -78,6 +82,17 @@ _YEAR = re.compile(r"^(19|20)\d{2}$")
 _NUM = re.compile(
     r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
     r"(?:percent|min|bn|ms|hr|tb|gb|mb|%|k|m|b|x|s|h)?(?![a-z0-9])",
+    re.I,
+)
+
+# A candidate's own statement of limited proficiency. Written after the skill
+# ("Go (basic)") or before it ("familiar with Terraform").
+_QUALIFIERS = r"basic|beginner|learning|familiar|exposure|limited|novice|elementary"
+_QUALIFIED_AFTER = re.compile(
+    rf"([A-Za-z][\w.+#-]*)\s*\(\s*((?:{_QUALIFIERS})[^)]*)\)", re.I
+)
+_QUALIFIED_BEFORE = re.compile(
+    r"\b(familiar with|exposure to|basic knowledge of|learning|beginner in)\s+([A-Za-z][\w.+#-]*)",
     re.I,
 )
 
@@ -215,6 +230,58 @@ def _cited(
     return atoms
 
 
+def _mentions(term: str, text: str) -> bool:
+    """Whole-word mention; English-word tool names only as a proper noun."""
+    if term.lower() in AMBIGUOUS_TECH:
+        return bool(re.search(rf"(?<![A-Za-z0-9]){term.capitalize()}(?![A-Za-z0-9-])", text))
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(term.lower())}(?![a-z0-9])", text.lower()))
+
+
+def _qualified_skills(graph: CareerGraph) -> dict[str, str]:
+    """Skills the candidate qualified that no achievement demonstrates.
+
+    Returns {skill: qualifier}. The qualified mentions themselves are cut out
+    before looking for a demonstration, so "Go (basic)" cannot vouch for Go.
+    """
+    qualified: dict[str, str] = {}
+    for atom in graph.atoms:
+        for text in (atom.raw_text, *atom.skills):
+            for m in _QUALIFIED_AFTER.finditer(text):
+                qualified.setdefault(m.group(1), m.group(2).strip())
+            for m in _QUALIFIED_BEFORE.finditer(text):
+                qualified.setdefault(m.group(2), m.group(1).lower())
+    if not qualified:
+        return {}
+
+    evidence = " ".join(
+        text
+        for a in graph.atoms
+        if a.type in {"achievement", "responsibility", "project"}
+        for text in (a.raw_text, *a.skills)
+    )
+    evidence = _QUALIFIED_BEFORE.sub(" ", _QUALIFIED_AFTER.sub(" ", evidence))
+    return {s: q for s, q in qualified.items() if not _mentions(s, evidence)}
+
+
+def _check_skills(problems: list[Untraced], resume: TailoredResume, graph: CareerGraph) -> None:
+    """tailor.md: a qualified skill is dropped or listed last, never presented
+    as a strength. Leading the list with one is the most-read oversell on a
+    resume - it is where the interviewer starts."""
+    for skill, qualifier in _qualified_skills(graph).items():
+        for i, entry in enumerate(resume.skills):
+            if not _mentions(skill, entry):
+                continue
+            first = qualifier.split()[0].lower()
+            if first not in entry.lower():
+                problems.append(Untraced(
+                    "skills", "overstated_skill", f"{skill} (candidate: {qualifier})", entry, "skills"
+                ))
+            elif i == 0:
+                problems.append(Untraced(
+                    "skills", "overstated_skill", f"{skill} leads the list", entry, "skills"
+                ))
+
+
 def _norm_words(text: str) -> list[str]:
     words = re.findall(r"[a-z0-9+#]+", text.lower())
     return [_ROLE_ABBREVIATIONS.get(w, w) for w in words]
@@ -303,6 +370,8 @@ def trace_claims(
     for skill in resume.skills:
         for tech in sorted(_claimed_tech(skill) - _sourced_tech(everything)):
             problems.append(Untraced("skills", "unsourced_technology", tech, skill, "skills"))
+
+    _check_skills(problems, resume, graph)
 
     schooling = _corpus(
         [a for a in graph.atoms if a.type in {"education", "credential"}] or graph.atoms,
