@@ -248,8 +248,12 @@ Prompt layout is deliberate: `[system][career graph ← stable][JD ← varies]`.
 The graph is identical across every application one candidate makes, so keeping
 it first and unchanged makes it the cacheable prefix.
 
-**The verifier has its own, opt-in failover.** `MODEL_VERIFY_FALLBACKS` is
-empty by default; anything in it from the tailorer's family is dropped. The
+**The verifier has its own failover.** `MODEL_VERIFY_FALLBACKS` (empty in code,
+`gpt-oss-20b` in `.env.example`); anything in it from the tailorer's family is
+dropped. A model belongs there only after passing the verifier eval with zero
+misses: `gpt-oss-20b` scored 0/12 misses, 1/11 false positives, 19/23 exact;
+`qwen3.8-27b` was rejected for missing `flag_misattributed_merge`. Both are on
+Groq, so this covers a rate-limited or overloaded model, not a Groq outage. The
 reverse is enforced too: the tailorer's fallbacks skip the verifier's family,
 so a rate-limited Gemini can never hand the writing to the model that checks it.
 
