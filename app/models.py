@@ -49,6 +49,11 @@ MAX_BACKOFF = 90.0
 # Gemini returns {"retryDelay": "21s"} on a 429, and the default exponential
 # schedule (1+2+4s) gave up well before the quota window reopened.
 _RETRY_DELAY = re.compile(r'"?retry(?:_|-)?delay"?\s*[:=]\s*"?(\d+(?:\.\d+)?)s', re.IGNORECASE)
+# Groq words it instead: "Please try again in 9.81s." / "in 1m2.5s" / "in 340ms".
+# Its free tier is 8k tokens/minute and counts max_tokens against it, so one
+# verify call nearly fills the window; without this hint the fallback schedule
+# (1+3+9s) gave up long before the window reset.
+_TRY_AGAIN = re.compile(r"try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)(ms|s)\b", re.IGNORECASE)
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -57,8 +62,13 @@ def _is_transient(exc: Exception) -> bool:
 
 
 def _suggested_delay(exc: Exception) -> float | None:
-    if m := _RETRY_DELAY.search(str(exc)):
+    text = str(exc)
+    if m := _RETRY_DELAY.search(text):
         return min(float(m.group(1)) + 1.0, MAX_BACKOFF)
+    if m := _TRY_AGAIN.search(text):
+        minutes, amount, unit = m.groups()
+        seconds = float(amount) / (1000 if unit.lower() == "ms" else 1) + 60 * int(minutes or 0)
+        return min(seconds + 1.0, MAX_BACKOFF)
     return None
 
 
