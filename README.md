@@ -89,6 +89,31 @@ Both sides accept `--profile-text` / `--profile-file` and `--jd-text` /
 `--jd-file` (PDF, DOCX, TXT, MD). Pass `--email` or `--phone` when the document
 has no contact details. Tests need no keys: `./.venv/bin/python -m pytest evals/ -q`.
 
+### Demo mode
+
+Free-tier models can take minutes per run, which is too slow to demo live. So
+seed a demo database once, then click through finished runs:
+
+```bash
+./.venv/bin/python scripts/seed_demo.py --fresh      # ~23 model calls, once
+RESUME_AGENT_DB=data/demo.db ./.venv/bin/uvicorn app.web:app --port 8000
+```
+
+It holds four real runs on synthetic gold-set pairs, kept apart from your
+working store:
+
+| Run | What it shows |
+|---|---|
+| **Not matching:** a payments PM against a Go engineering role | Deep domain expertise does not make a PM an engineer. Hard gate failed, and the gap report suggests three PM roles that do fit |
+| **Partial match:** a backend engineer with "Go (basic)" against "strong Go" | The candidate's own qualifier grades `none`. The claim trace flags the resume for still leading its skills with Go |
+| **Strong match:** a platform engineer against an SRE role | 100% coverage. The claim trace catches the summary copying the job's "7+ years" instead of the candidate's computed 9 |
+| **Review gate** (labelled *demo: planted fabrication*) | One fabricated metric planted in a real resume. The real verifier blocks it and explains why |
+
+The planted run is the only staged element, and its title says so. Ticking the
+box releases the resume, and the claim trace then flags the planted figure as
+unsourced. That changes the demo database, so back it up before a demo
+(`cp data/demo.db data/demo.db.bak`) and copy it back afterwards.
+
 **Status:** the pipeline (M0) and the web app with persistence and the human
 review gate (M1) are built. Next is growing the gold set and the enrichment
 interviewer (M2).
