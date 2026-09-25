@@ -13,6 +13,7 @@ collecting from the first run, and it costs nothing to write the table now.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -24,7 +25,9 @@ from app.config import settings
 from app.schemas import CareerGraph, Identity, JobSpec, Scorecard, TailoredResume, VerifyReport
 from app.tools.identity import merge_identities
 
-DB_PATH = settings.root / "data" / "resume_agent.db"
+# RESUME_AGENT_DB points the app at another store - e.g. the seeded demo
+# database (scripts/seed_demo.py), kept apart from your working one.
+DB_PATH = settings.root / os.getenv("RESUME_AGENT_DB", "data/resume_agent.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
